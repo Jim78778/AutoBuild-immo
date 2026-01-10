@@ -18,10 +18,8 @@ env:
   # ===== 时区 =====
   TZ: Asia/Shanghai
 
-  # ===== 输出 =====
+  # ===== 输出控制 =====
   UPLOAD_FIRMWARE: true
-  UPLOAD_BIN_DIR: false
-  UPLOAD_RELEASE: false
 
 jobs:
   build:
@@ -31,13 +29,18 @@ jobs:
     - name: Checkout AutoBuild Repo
       uses: actions/checkout@v4
 
+    - name: Set Timezone
+      run: |
+        sudo timedatectl set-timezone "$TZ"
+
     - name: Initialize Build Environment
       run: |
         sudo apt update
         sudo apt install -y \
           build-essential clang flex g++ gawk gcc-multilib gettext \
           git libncurses5-dev libssl-dev python3 python3-distutils \
-          rsync unzip zlib1g-dev file wget
+          rsync unzip zlib1g-dev file wget \
+          libelf-dev ecj fastjar
 
     - name: Clone ImmortalWrt-IPQ Source
       run: |
@@ -45,20 +48,20 @@ jobs:
         cd openwrt
         git log -1 --oneline
 
-    # ======= 关键：添加 QModem feed =======
+    # ===== 添加 QModem feed =====
     - name: Add QModem Feed
       run: |
         cd openwrt
-        echo "src-git qmodem https://github.com/FUjr/QModem.git" >> feeds.conf.default
-        tail -n 5 feeds.conf.default
+        echo "src-git qmodem https://github.com/FUjr/QModem.git" >> $FEEDS_CONF
+        tail -n 5 $FEEDS_CONF
 
-    - name: Update & Install Feeds (with QModem)
+    - name: Update & Install Feeds
       run: |
         cd openwrt
         ./scripts/feeds update -a
         ./scripts/feeds install -a
-        ./scripts/feeds install -a -p qmodem
 
+    # ===== 载入配置 & 强制禁用 Rust =====
     - name: Load .config
       run: |
         cd openwrt
@@ -66,22 +69,32 @@ jobs:
           echo "❌ 未找到 .config"
           exit 1
         fi
+
         cp $GITHUB_WORKSPACE/$CONFIG_FILE .config
+
+        # 🚫 强制禁用 Rust（避免 host rustc 编译）
+        sed -i 's/CONFIG_RUST=y/# CONFIG_RUST is not set/' .config
+        sed -i 's/CONFIG_RUST_TOOLCHAIN=y/# CONFIG_RUST_TOOLCHAIN is not set/' .config
+
         yes "" | make oldconfig
+
+        echo "==== RUST CHECK ===="
+        grep -i rust .config || echo "OK: no rust enabled"
 
     - name: Download Packages
       run: |
         cd openwrt
-        make download -j8
+        make download -j$(nproc)
 
     - name: Compile Firmware
       run: |
         cd openwrt
-        make -j$(nproc) V=s || make -j1 V=s
+        make -j$(nproc) || make -j1 V=s
 
     - name: Upload Firmware
       if: env.UPLOAD_FIRMWARE == 'true'
       uses: actions/upload-artifact@v4
       with:
         name: ImmortalWrt-IPQ-QModem
-        path: openwrt/bin/targets/
+        path: |
+          openwrt/bin/targets/*/*
