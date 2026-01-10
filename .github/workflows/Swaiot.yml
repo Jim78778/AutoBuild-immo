@@ -50,9 +50,9 @@ jobs:
     - name: Load CI Config (single device)
       run: |
         cd openwrt
-        cp $GITHUB_WORKSPACE/$CONFIG_FILE .config
-        sed -i 's/^CONFIG_TARGET_qualcommax_ipq807x_DEVICE_.*/# &/' .config
-        echo 'CONFIG_TARGET_qualcommax_ipq807x_DEVICE_cpe_s10=y' >> .config
+        cp $GITHUB_WORKSPACE/$CONFIG_FILE ci.config
+        sed -i 's/^CONFIG_TARGET_qualcommax_ipq807x_DEVICE_.*/# &/' ci.config
+        echo 'CONFIG_TARGET_qualcommax_ipq807x_DEVICE_cpe_s10=y' >> ci.config
         make defconfig
 
     - name: Rust Host Insurance
