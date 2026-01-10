@@ -4,12 +4,12 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - main
+      - patch-1
 
 env:
   REPO_URL: https://github.com/Jim78778/immortalwrt-ipq.git
   REPO_BRANCH: master
-  CONFIG_FILE: .config
+  CONFIG_FILE: ci.config
   TZ: Asia/Shanghai
 
 jobs:
@@ -47,14 +47,22 @@ jobs:
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
-    - name: Load .config
+    - name: Load CI Config (single device)
       run: |
         cd openwrt
         cp $GITHUB_WORKSPACE/$CONFIG_FILE .config
-        sed -i 's/CONFIG_RUST=y/# CONFIG_RUST is not set/' .config
-        yes "" | make oldconfig
+        sed -i 's/^CONFIG_TARGET_qualcommax_ipq807x_DEVICE_.*/# &/' .config
+        echo 'CONFIG_TARGET_qualcommax_ipq807x_DEVICE_cpe_s10=y' >> .config
+        make defconfig
 
-    - name: Download Packages
+    - name: Rust Host Insurance
+      run: |
+        cd openwrt
+        rm -rf build_dir/host/rust*
+        rm -rf staging_dir/hostpkg/rust*
+        rm -rf dl/rust*
+        
+    - name: Download Packagessed 
       run: |
         cd openwrt
         make download -j$(nproc)
