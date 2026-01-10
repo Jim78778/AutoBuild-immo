@@ -9,7 +9,7 @@ on:
 env:
   # ===== 源码 =====
   REPO_URL: https://github.com/Jim78778/immortalwrt-ipq.git
-  REPO_BRANCH: main
+  REPO_BRANCH: master
 
   # ===== 配置 =====
   CONFIG_FILE: .config
