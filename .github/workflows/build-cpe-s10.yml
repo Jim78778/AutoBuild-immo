@@ -68,15 +68,27 @@ jobs:
         run: |
           cd openwrt
           echo "==== FINAL CONFIG CHECK ===="
-          grep -Ei 'rust|shadowsocks' .config && {
-            echo "Rust or Shadowsocks detected"
+
+          # 只检查真正启用的 Rust
+          grep -E '^(CONFIG_RUST=y|CONFIG_RUST_TOOLCHAIN=y|CONFIG_PACKAGE_rust=y|CONFIG_PACKAGE_cargo=y)' .config && {
+            echo "❌ Rust ENABLED"
             exit 1
           }
-          grep CONFIG_PACKAGE_kmod-qca-nss .config || {
-            echo "NSS not enabled"
-            exit 1
-          }
-          echo "CONFIG OK"
+
+           # 只检查真正启用的 Shadowsocks
+           grep -E '^CONFIG_PACKAGE_.*shadowsocks.*=y' .config && {
+             echo "❌ Shadowsocks ENABLED"
+             exit 1
+           }
+
+            # NSS 必须存在
+            grep '^CONFIG_PACKAGE_kmod-qca-nss-drv=y' .config || {
+              echo "❌ NSS driver missing"
+              exit 1
+            }
+
+            echo "✅ CONFIG SAFE"
+
 
       - name: Download Packages
         run: |
