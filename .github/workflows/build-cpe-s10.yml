@@ -121,11 +121,11 @@ jobs:
     - name: 编译核心依赖包 (kmod-qca-nss-drv)
       run: |
         cd openwrt
-        echo “开始编译 kmod-qca-nss-drv (使用源码目录名)...”
-        # 关键：将 “kmod-qca-nss-drv” 替换为 “qca-nss-drv”
+        echo "开始编译 kmod-qca-nss-drv (使用源码目录名)..."
+        # 关键：使用源码目录名 'qca-nss-drv'
         make package/feeds/nss_packages/qca-nss-drv/compile V=s
-        echo “核心依赖包编译完成。”
-
+        echo "核心依赖包编译完成。"
+    
     - name: Download Packages
       run: |
         cd openwrt
