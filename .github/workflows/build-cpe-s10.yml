@@ -97,23 +97,31 @@ jobs:
     - name: Find Correct NSS Driver Package Name
       run: |
         cd openwrt
-        echo “=== 列出 nss_packages feed 中已安装的包 ===”
-        ./scripts/feeds list -r nss_packages | grep -i “nss.*drv” || echo “(未找到相关包)”
+        echo "=== 列出 nss_packages feed 中已安装的包 ==="
+        # 方法1：使用 feeds 命令列出
+        ./scripts/feeds list -r nss_packages 2>/dev/null | grep -i "nss" || echo "(feeds list 未找到相关包或命令执行失败)"
         
-        echo -e “\n=== 检查 package/feeds/nss_packages 目录下的实际内容 ===”
-        ls -la package/feeds/nss_packages/ | grep -i “nss” || echo “(未找到相关目录)”
+        echo -e "\n=== 检查 package/feeds/nss_packages 目录下的实际内容 ==="
+        # 方法2：直接查看目录，这是最可靠的方法
+        ls -1 package/feeds/nss_packages/ 2>/dev/null | grep -i "nss" || echo "(目录不存在或为空)"
         
-        echo -e “\n=== 建议：尝试编译以下常见包名 ===”
-        echo “如果上方列表为空，可以手动尝试以下常见包名：”
-        echo “1. make package/feeds/nss_packages/qca-nss-drv/compile”
-        echo “2. make package/feeds/nss_packages/qca-nss-drv-ppe/compile”
-        echo “3. make package/feeds/nss_packages/kmod-qca-nss-drv-ppe/compile”
-    - name: Compile NSS Driver Dependency (强制优先)
-      run: |
-        cd openwrt
-        echo “强制编译 kmod-qca-nss-drv...”
-        # 这里使用你确定的依赖包名，如果不同请替换
-        make package/feeds/nss_packages/kmod-qca-nss-drv/compile V=s
+        echo -e "\n=== 列出所有可能的候选包 (用于后续尝试) ==="
+        # 获取所有以 nss 或 qca 开头的目录名
+        for dir in package/feeds/nss_packages/* 2>/dev/null; do
+          if [ -d "$dir" ]; then
+            dirname=$(basename "$dir")
+            # 筛选出可能相关的包
+            if [[ "$dirname" == *"nss"* ]] || [[ "$dirname" == *"qca"* ]]; then
+              echo "发现包目录: $dirname"
+              # 检查其 Makefile 中是否有编译内核模块的迹象
+              if [ -f "$dir/Makefile" ] && grep -q "KernelPackage" "$dir/Makefile" 2>/dev/null; then
+                echo "  -> 这是一个内核模块包 (包含 KernelPackage)"
+              fi
+            fi
+          fi
+        done
+        
+        echo -e "\n=== 诊断完成 ===\n请将上方列出的包目录名称，用于修改后续的编译命令。"
 
     - name: Compile qca-nss-ecm with Fixed Symbols
       run: |
