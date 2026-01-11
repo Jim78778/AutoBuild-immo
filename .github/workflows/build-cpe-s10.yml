@@ -73,197 +73,63 @@ jobs:
         # 🎯 只保留 CPE-S10
         sed -i 's/^CONFIG_TARGET_qualcommax_ipq807x_DEVICE_.*/# &/' .config
         echo 'CONFIG_TARGET_qualcommax_ipq807x_DEVICE_cpe_s10=y' >> .config
+        # 🔑 【关键】启用核心驱动包 (只需一次，且在 make defconfig 之前)
+        echo 'CONFIG_PACKAGE_kmod-qca-nss-drv=y' >> .config
 
         make defconfig
 
         echo "==== FINAL RUST CHECK ===="
         grep -i rust .config || echo "OK: no rust enabled"
-    
-    - name: Fix qca-nss-ecm Dependency
+        echo "==== NSS DRIVER CHECK ===="
+        grep CONFIG_PACKAGE_kmod-qca-nss-drv .config || echo "WARN: NSS driver not in config"
+
+    - name: 修复 qca-nss-ecm 依赖
       run: |
         cd openwrt
         ECM_MAKEFILE="package/feeds/nss_packages/qca-nss-ecm/Makefile"
         
-        # 1. 添加编译时依赖 (假设依赖包为 kmod-qca-nss-drv)
-        sed -i '/^PKG_NAME:=qca-nss-ecm$/aPKG_BUILD_DEPENDS:=kmod-qca-nss-drv' "$ECM_MAKEFILE"
+        # 1. 添加编译时依赖
+        sed -i '/^PKG_NAME:=qca-nss-ecm$/aPKG_BUILD_DEPENDS:=qca-nss-drv' "$ECM_MAKEFILE"
         
         # 2. 修改编译命令以传递依赖包的符号表
         sed -i '/define Build\/Compile/,/endef/ {
-            s|$(MAKE) -C "$(LINUX_DIR)"|& KBUILD_EXTRA_SYMBOLS="$(TOPDIR)/build_dir/target-*/*kmod-qca-nss-drv*/Module.symvers"|
+            s|$(MAKE) -C "$(LINUX_DIR)"|& KBUILD_EXTRA_SYMBOLS="$(TOPDIR)/build_dir/target-*/*qca-nss-drv*/Module.symvers"|
         }' "$ECM_MAKEFILE"
         
-        echo "已修复 $ECM_MAKEFILE 的依赖配置"
+        echo "已修复依赖配置。将依赖包 'qca-nss-drv' 的符号表传递给 'qca-nss-ecm'。"
 
-    - name: Compile NSS Driver Dependency (强制优先)
+    - name: 验证配置与目录
       run: |
         cd openwrt
-        echo “强制编译 kmod-qca-nss-drv...”
-        # 这里使用你确定的依赖包名，如果不同请替换
-        make package/feeds/nss_packages/kmod-qca-nss-drv/compile V=s
-
-    - name: Compile qca-nss-ecm with Fixed Symbols
-      run: |
-        cd openwrt
-        echo “查找依赖包的符号表文件...”
-        # 关键：根据实际架构路径查找，使用更精确的路径模式
-        SYMVERS_PATH=$(find build_dir/target-aarch64_cortex-a53_musl/linux-qualcommax_ipq807x -path "*/kmod-qca-nss-drv-*/Module.symvers" 2>/dev/null | head -n1)
-        
-        if [ -z "$SYMVERS_PATH" ]; then
-          echo “错误：未找到 kmod-qca-nss-drv 的 Module.symvers 文件。”
-          echo “尝试列出可能目录...”
-          find build_dir -name “Module.symvers” 2>/dev/null || true
+        echo "=== 验证开始 ==="
+        echo "1. 检查核心驱动包配置..."
+        if grep -q '^CONFIG_PACKAGE_kmod-qca-nss-drv=y$' .config; then
+          echo "   ✅ 配置已启用"
+        else
+          echo "   ❌ 配置未启用，编译将失败"
           exit 1
         fi
-        
-        echo “找到符号表文件: $SYMVERS_PATH”
-        echo “验证文件中是否包含所需符号...”
-        grep nss_rmnet_rx_get_ifnum “$SYMVERS_PATH” || echo “警告：符号不在该文件中，可能需要检查其他依赖包。”
-        
-        echo “开始编译 qca-nss-ecm...”
-        # 通过环境变量传递符号表绝对路径，并开启详细日志
-        KBUILD_EXTRA_SYMBOLS=“$SYMVERS_PATH” make package/feeds/nss_packages/qca-nss-ecm/compile -j1 V=sc
-        
+        echo "2. 检查源码目录..."
+        if [ -d "package/feeds/nss_packages/qca-nss-drv" ]; then
+          echo "   ✅ 目录存在"
+        else
+          echo "   ❌ 目录不存在"
+          exit 1
+        fi
+        echo "=== 验证通过 ==="
+
+    - name: 编译核心依赖包 (kmod-qca-nss-drv)
+      run: |
+        cd openwrt
+        echo "开始编译 kmod-qca-nss-drv，此步骤耗时较长..."
+        make package/feeds/nss_packages/kmod-qca-nss-drv/compile V=s
+        echo "核心依赖包编译完成。"
+
     - name: Download Packages
       run: |
         cd openwrt
         make download -j$(nproc)
 
-    - name: 🔍 Diagnose Symbol Dependency
-      id: diagnose_symbols
-      run: |
-        set -e
-        cd openwrt || { echo "❌ 无法进入 openwrt 目录"; exit 1; }
-        
-        echo "📁 当前工作目录: $(pwd)"
-        echo "=========================================="
-        
-        # 1. 搜索符号定义
-        echo "🔎 步骤 1/3: 搜索符号 'nss_rmnet_rx_get_ifnum' 的定义"
-        echo "--------------------------------------------------"
-        SYMBOL_SOURCES=$(find package/feeds -type f \( -name "*.c" -o -name "*.h" -o -name "*.mk" \) -exec grep -l "nss_rmnet_rx_get_ifnum" {} \; 2>/dev/null || true)
-        
-        if [ -n "$SYMBOL_SOURCES" ]; then
-            echo "✅ 找到符号定义，位于以下文件:"
-            echo "$SYMBOL_SOURCES" | while IFS= read -r file; do
-                echo "   • $file"
-                # 可选：显示匹配行上下文
-                # grep -n "nss_rmnet_rx_get_ifnum" "$file" | head -2 | sed 's/^/     /'
-            done
-            # 提取可能的包名
-            PKG_CANDIDATES=$(echo "$SYMBOL_SOURCES" | sed 's|package/feeds/\([^/]*\)/.*|\1|' | sort -u)
-            echo "📦 可能的提供者包: $PKG_CANDIDATES"
-        else
-            echo "⚠️  未在 feeds 中找到符号定义"
-            # 扩大搜索范围
-            echo "🔍 扩大搜索范围至整个源码树..."
-            find . -type f \( -name "*.c" -o -name "*.h" \) -exec grep -l "nss_rmnet_rx_get_ifnum" {} \; 2>/dev/null | head -5 || echo "   (未找到)"
-        fi
-        
-        echo ""
-        
-        # 2. 检查依赖包状态
-        echo "🔧 步骤 2/3: 检查依赖包编译状态"
-        echo "--------------------------------------------------"
-        
-        # 定义要检查的包列表（可根据上一步结果动态调整）
-        CHECK_PKGS="kmod-qca-nss-drv kmod-qca-nss-drv-ppe"
-        FOUND_SYMVERS=""
-        
-        for PKG in $CHECK_PKGS; do
-            echo "检查包: $PKG"
-            
-            # 查找包目录
-            PKG_DIR=$(find package/feeds -type d -name "$PKG" 2>/dev/null | head -1)
-            if [ -n "$PKG_DIR" ]; then
-                echo "   📍 位置: $PKG_DIR"
-            else
-                echo "   ⚠️  未在 feeds 中找到包目录"
-            fi
-            
-            # 查找符号表文件
-            SYMVERS=$(find build_dir -type f -name "Module.symvers" -path "*$PKG*" 2>/dev/null | head -1)
-            
-            if [ -n "$SYMVERS" ]; then
-                echo "   ✅ 找到 Module.symvers"
-                echo "      路径: $SYMVERS"
-                
-                # 检查是否包含目标符号
-                if grep -q "nss_rmnet_rx_get_ifnum" "$SYMVERS"; then
-                    echo "      包含目标符号: ✅"
-                    FOUND_SYMVERS="$SYMVERS"
-                    # 将找到的路径设置为步骤输出，供后续步骤使用
-                    echo "provider_symvers=$SYMVERS" >> "$GITHUB_OUTPUT"
-                else
-                    echo "      不包含目标符号: ❌"
-                fi
-                
-                # 显示前几个符号示例
-                echo "      符号表示例:"
-                head -3 "$SYMVERS" | sed 's/^/        /'
-            else
-                echo "   ❌ 未找到 Module.symvers (可能未编译)"
-                
-                # 检查是否有编译目录存在
-                BUILD_DIR=$(find build_dir -type d -name "*$PKG*" 2>/dev/null | head -1)
-                if [ -n "$BUILD_DIR" ]; then
-                    echo "      存在构建目录: $BUILD_DIR"
-                    ls -la "$BUILD_DIR/" 2>/dev/null | grep -E "(Module|\.ko|\.o)" || true
-                fi
-            fi
-            echo ""
-        done
-        
-        # 3. 检查 qca-nss-ecm 配置状态
-        echo "📋 步骤 3/3: 检查 qca-nss-ecm 配置状态"
-        echo "--------------------------------------------------"
-        
-        ECM_MAKEFILE="package/feeds/nss_packages/qca-nss-ecm/Makefile"
-        
-        if [ -f "$ECM_MAKEFILE" ]; then
-            echo "✅ Makefile 存在: $ECM_MAKEFILE"
-            
-            # 检查 PKG_BUILD_DEPENDS
-            echo "   1. PKG_BUILD_DEPENDS 配置:"
-            grep -n "PKG_BUILD_DEPENDS" "$ECM_MAKEFILE" || echo "      (未设置)"
-            
-            # 检查 DEPENDS
-            echo "   2. DEPENDS 配置:"
-            grep -n "^DEPENDS" "$ECM_MAKEFILE" || echo "      (未设置)"
-            
-            # 检查 KBUILD_EXTRA_SYMBOLS
-            echo "   3. KBUILD_EXTRA_SYMBOLS 配置:"
-            grep -n -A2 -B2 "KBUILD_EXTRA_SYMBOLS" "$ECM_MAKEFILE" || echo "      (未找到)"
-            
-            # 显示 Build/Compile 部分
-            echo "   4. Build/Compile 部分:"
-            sed -n '/define Build\/Compile/,/endef/p' "$ECM_MAKEFILE" | head -10 || echo "      (无法提取)"
-        else
-            echo "❌ Makefile 不存在: $ECM_MAKEFILE"
-        fi
-        
-        echo ""
-        echo "=========================================="
-        echo "📊 诊断摘要:"
-        
-        if [ -n "$FOUND_SYMVERS" ]; then
-            echo "✅ 找到包含目标符号的 Module.symvers: $FOUND_SYMVERS"
-        else
-            echo "❌ 未找到包含目标符号的 Module.symvers"
-        fi
-        
-        if [ -n "$SYMBOL_SOURCES" ]; then
-            echo "✅ 找到符号定义，提供者包可能是: $(echo $PKG_CANDIDATES | tr '\n' ' ')"
-        else
-            echo "⚠️  未找到符号定义，可能需要检查其他源码"
-        fi
-        
-        # 设置步骤结论
-        if [ -n "$FOUND_SYMVERS" ]; then
-            echo "diagnosis_result=success" >> "$GITHUB_OUTPUT"
-        else
-            echo "diagnosis_result=failed" >> "$GITHUB_OUTPUT"
-        fi
-    
     - name: Compile Firmware
       run: |
         cd openwrt
