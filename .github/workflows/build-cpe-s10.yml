@@ -78,7 +78,22 @@ jobs:
 
         echo "==== FINAL RUST CHECK ===="
         grep -i rust .config || echo "OK: no rust enabled"
-
+    
+    - name: Fix qca-nss-ecm Dependency
+      run: |
+        cd openwrt
+        ECM_MAKEFILE="package/feeds/nss_packages/qca-nss-ecm/Makefile"
+        
+        # 1. 添加编译时依赖 (假设依赖包为 kmod-qca-nss-drv)
+        sed -i '/^PKG_NAME:=qca-nss-ecm$/aPKG_BUILD_DEPENDS:=kmod-qca-nss-drv' "$ECM_MAKEFILE"
+        
+        # 2. 修改编译命令以传递依赖包的符号表
+        sed -i '/define Build\/Compile/,/endef/ {
+            s|$(MAKE) -C "$(LINUX_DIR)"|& KBUILD_EXTRA_SYMBOLS="$(TOPDIR)/build_dir/target-*/*kmod-qca-nss-drv*/Module.symvers"|
+        }' "$ECM_MAKEFILE"
+        
+        echo "已修复 $ECM_MAKEFILE 的依赖配置"
+    
     - name: Download Packages
       run: |
         cd openwrt
