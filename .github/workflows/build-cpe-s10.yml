@@ -64,6 +64,12 @@ jobs:
           cp $GITHUB_WORKSPACE/$CONFIG_FILE .config
           make defconfig
 
+      - name: Disable HAProxy QUIC (OpenSSL 3.x fix)
+        run: |
+          cd openwrt
+          HAPROXY_MK="feeds/packages/net/haproxy/Makefile"
+          sed -i 's/USE_QUIC=1/USE_QUIC=0/g' $HAPROXY_MK
+
       - name: Final Safety Check
         run: |
           cd openwrt
