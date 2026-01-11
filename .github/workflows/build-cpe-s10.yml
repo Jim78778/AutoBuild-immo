@@ -75,57 +75,44 @@ jobs:
     - name: 诊断并修复NSS符号依赖
       run: |
         cd openwrt
-        echo "=== 步骤1: 强制启用核心驱动包 ==="
+        
+        echo "=== 1. 强制启用核心驱动包 ==="
         sed -i '/CONFIG_PACKAGE_kmod-qca-nss-drv/d' .config
         echo 'CONFIG_PACKAGE_kmod-qca-nss-drv=y' >> .config
         
-        echo "=== 步骤2: 查找真正的符号表文件 ==="
-        SYM_PATH=$(find build_dir -name "Module.symvers" -path "*kmod-qca-nss-drv-*" 2>/dev/null | head -1)
+        echo "=== 2. 查找符号表文件 ==="
+        SYM_FILE=$(find build_dir -name "Module.symvers" -path "*kmod-qca-nss-drv*" 2>/dev/null | head -1)
         
-        if [ -z "$SYM_PATH" ]; then
-          echo "未找到已编译的符号表，将使用通配符路径。"
-          SYM_PATH="\$(TOPDIR)/build_dir/target-*/kmod-qca-nss-drv-*/Module.symvers"
+        if [ -n "$SYM_FILE" ]; then
+          echo "找到: $SYM_FILE"
+          SYM_PATH="$SYM_FILE"
         else
-          echo "找到符号表: $SYM_PATH"
-          if grep -q "nss_rmnet_rx_get_ifnum" "$SYM_PATH"; then
-            echo "所需符号已存在。"
-          fi
+          echo "未找到，使用通配符路径。"
+          SYM_PATH='$$(TOPDIR)/build_dir/target-*/kmod-qca-nss-drv-*/Module.symvers'
         fi
         
-        echo "=== 步骤3: 修复 ecm Makefile (关键修正) ==="
+        echo "=== 3. 修复 ecm Makefile ==="
         ECM_MAKEFILE="package/feeds/nss_packages/qca-nss-ecm/Makefile"
         
-        # 1. 清理旧配置并添加依赖
-        sed -i '/PKG_BUILD_DEPENDS.*qca-nss-drv/d' "$ECM_MAKEFILE"
+        # 确保使用正确的依赖名
+        sed -i '/PKG_BUILD_DEPENDS.*kmod-qca-nss-drv/d' "$ECM_MAKEFILE"
         sed -i '/^PKG_NAME:=qca-nss-ecm$/aPKG_BUILD_DEPENDS:=kmod-qca-nss-drv' "$ECM_MAKEFILE"
         
-        # 2. 创建临时修复脚本，避免YAML格式问题
-        cat > /tmp/fix_ecm.sh << 'EOF'
-        #!/bin/bash
-        MAKEFILE="$1"
-        SYM_PATH="$2"
+        # 直接编辑文件：先删除旧的KBUILD_EXTRA_SYMBOLS，再在Build/Compile后添加新的
+        sed -i '/KBUILD_EXTRA_SYMBOLS/d' "$ECM_MAKEFILE"
         
-        # 使用awk安全地插入KBUILD_EXTRA_SYMBOLS，这是最可靠的方法
-        awk -v sym_path="$SYM_PATH" '
-        /define Build\/Compile/ { in_block=1; print $0; next }
-        in_block && /^[[:space:]]*\$(MAKE)[[:space:]]+-C[[:space:]]+"\$(LINUX_DIR)"/ {
-          print $0 " KBUILD_EXTRA_SYMBOLS=\"" sym_path "\""
-          inserted=1
-          next
-        }
-        in_block && /^endef/ {
-          if (!inserted) {
-            print "\tKBUILD_EXTRA_SYMBOLS=\"" sym_path "\""
+        # 在Build/Compile段落内，第一个make命令后添加符号表参数
+        sed -i '/define Build\/Compile/,/endef/ {
+          /[[:space:]]*[^#].*\$(MAKE).*-C.*\$(LINUX_DIR)/ {
+            s/\([[:space:]]*[^#].*\$(MAKE).*-C.*\$(LINUX_DIR).*\)/\1 KBUILD_EXTRA_SYMBOLS=\"'"$SYM_PATH"'\"/ 
           }
-          in_block=0
-          inserted=0
-        }
-        { print $0 }
-        ' "$MAKEFILE" > "$MAKEFILE.fixed" && mv "$MAKEFILE.fixed" "$MAKEFILE"
-        EOF
+        }' "$ECM_MAKEFILE"
         
-        bash /tmp/fix_ecm.sh "$ECM_MAKEFILE" "$SYM_PATH"
-        echo "✅ 修复完成。符号表路径: $SYM_PATH""
+        echo "✅ 修复完成。符号表路径: $SYM_PATH"
+
+        echo "=== 调试: 检查修改结果 ==="
+        grep -n "PKG_BUILD_DEPENDS\|KBUILD_EXTRA_SYMBOLS" "$ECM_MAKEFILE"
+
 
     - name: Download Packages
       run: |
