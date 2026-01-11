@@ -95,3 +95,4 @@ jobs:
       with:
         name: Swaiot-CPE-S10-Firmware
         path: openwrt/bin/targets/ipq807x/*
+
