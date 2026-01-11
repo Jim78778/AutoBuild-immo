@@ -1,4 +1,4 @@
-name: Build Swaiot CPE-S10 ImmortalWrt
+name: Build Swaiot CPE-S10 ImmortalWrt (NSS Stable)
 
 on:
   workflow_dispatch:
@@ -10,7 +10,6 @@ env:
   REPO_URL: https://github.com/Jim78778/immortalwrt-ipq.git
   REPO_BRANCH: Jim78778-patch-1
   CONFIG_FILE: ci.config
-  FEEDS_CONF: feeds.conf.default
   TZ: Asia/Shanghai
   UPLOAD_FIRMWARE: true
 
@@ -25,7 +24,7 @@ jobs:
     - name: Set Timezone
       run: sudo timedatectl set-timezone "$TZ"
 
-    - name: Free Disk Space (IMPORTANT)
+    - name: Free Disk Space
       run: |
         sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
         sudo apt clean
@@ -37,8 +36,8 @@ jobs:
         sudo apt install -y \
           build-essential clang flex g++ gawk gcc-multilib gettext \
           git libncurses5-dev libssl-dev python3 python3-distutils \
-          rsync unzip zlib1g-dev file wget \
-          libelf-dev ecj fastjar
+          rsync unzip zlib1g-dev file wget libelf-dev \
+          bc subversion ecj fastjar
 
     - name: Clone ImmortalWrt Source
       run: |
@@ -55,64 +54,68 @@ jobs:
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
-    - name: Load CI Config (single device, rust killed)
+    - name: Load Config (CPE-S10 only, no Rust)
       run: |
         cd openwrt
+
         if [ ! -f "$GITHUB_WORKSPACE/$CONFIG_FILE" ]; then
           echo "❌ ci.config not found"
           exit 1
         fi
+
         cp $GITHUB_WORKSPACE/$CONFIG_FILE .config
-        sed -i 's/CONFIG_RUST=y/# CONFIG_RUST is not set/' .config
-        sed -i 's/CONFIG_RUST_TOOLCHAIN=y/# CONFIG_RUST_TOOLCHAIN is not set/' .config
+
+        # 禁用 Rust（彻底）
+        sed -i 's/^CONFIG_RUST.*$/# &/' .config
+        sed -i 's/^CONFIG_RUST_TOOLCHAIN.*$/# &/' .config
+
+        # 只保留 CPE-S10
         sed -i 's/^CONFIG_TARGET_qualcommax_ipq807x_DEVICE_.*/# &/' .config
         echo 'CONFIG_TARGET_qualcommax_ipq807x_DEVICE_cpe_s10=y' >> .config
-        echo 'CONFIG_PACKAGE_kmod-qca-nss-drv=y' >> .config
-        make defconfig
-        echo "==== 配置检查 ===="
-        grep CONFIG_PACKAGE_kmod-qca-nss-drv .config || echo "状态: 未启用"
 
-    - name: 诊断并修复NSS符号依赖
+        # 启用 NSS 核心驱动
+        echo 'CONFIG_PACKAGE_kmod-qca-nss-drv=y' >> .config
+
+        make defconfig
+
+        echo "==== FINAL CONFIG CHECK ===="
+        grep -i rust .config || echo "OK: rust disabled"
+        grep CONFIG_TARGET_qualcommax_ipq807x_DEVICE_cpe_s10 .config
+        grep CONFIG_PACKAGE_kmod-qca-nss-drv .config
+
+    - name: Compile qca-nss-drv (SERIAL)
       run: |
         cd openwrt
-        
-        echo "=== 1. 强制启用核心驱动包 ==="
-        sed -i '/CONFIG_PACKAGE_kmod-qca-nss-drv/d' .config
-        echo 'CONFIG_PACKAGE_kmod-qca-nss-drv=y' >> .config
-        
-        echo "=== 2. 查找符号表文件 ==="
-        SYM_FILE=$(find build_dir -name "Module.symvers" -path "*kmod-qca-nss-drv*" 2>/dev/null | head -1)
-        
-        if [ -n "$SYM_FILE" ]; then
-          echo "找到: $SYM_FILE"
-          SYM_PATH="$SYM_FILE"
-        else
-          echo "未找到，使用通配符路径。"
-          SYM_PATH='$$(TOPDIR)/build_dir/target-*/kmod-qca-nss-drv-*/Module.symvers'
+        echo "▶ compiling qca-nss-drv (j1)"
+        make package/feeds/nss_packages/qca-nss-drv/compile V=s -j1
+
+        echo "▶ locating Module.symvers"
+        NSS_SYMS=$(find build_dir/target-* \
+          -path '*qca-nss-drv*' \
+          -name Module.symvers | head -n1)
+
+        if [ -z "$NSS_SYMS" ]; then
+          echo "❌ NSS Module.symvers NOT FOUND"
+          exit 1
         fi
-        
-        echo "=== 3. 修复 ecm Makefile ==="
-        ECM_MAKEFILE="package/feeds/nss_packages/qca-nss-ecm/Makefile"
-        
-        # 确保使用正确的依赖名
-        sed -i '/PKG_BUILD_DEPENDS.*kmod-qca-nss-drv/d' "$ECM_MAKEFILE"
-        sed -i '/^PKG_NAME:=qca-nss-ecm$/aPKG_BUILD_DEPENDS:=kmod-qca-nss-drv' "$ECM_MAKEFILE"
-        
-        # 直接编辑文件：先删除旧的KBUILD_EXTRA_SYMBOLS，再在Build/Compile后添加新的
-        sed -i '/KBUILD_EXTRA_SYMBOLS/d' "$ECM_MAKEFILE"
-        
-        # 在Build/Compile段落内，第一个make命令后添加符号表参数
-        sed -i '/define Build\/Compile/,/endef/ {
-          /[[:space:]]*[^#].*\$(MAKE).*-C.*\$(LINUX_DIR)/ {
-            s/\([[:space:]]*[^#].*\$(MAKE).*-C.*\$(LINUX_DIR).*\)/\1 KBUILD_EXTRA_SYMBOLS=\"'"$SYM_PATH"'\"/ 
-          }
-        }' "$ECM_MAKEFILE"
-        
-        echo "✅ 修复完成。符号表路径: $SYM_PATH"
 
-        echo "=== 调试: 检查修改结果 ==="
-        grep -n "PKG_BUILD_DEPENDS\|KBUILD_EXTRA_SYMBOLS" "$ECM_MAKEFILE"
+        echo "✅ NSS Module.symvers = $NSS_SYMS"
+        echo "NSS_SYMS=$NSS_SYMS" >> $GITHUB_ENV
 
+    - name: Compile qca-nss-ecm (SERIAL, injected symbols)
+      run: |
+        cd openwrt
+        echo "▶ compiling qca-nss-ecm (j1)"
+        export KBUILD_EXTRA_SYMBOLS="$NSS_SYMS"
+        make package/feeds/nss_packages/qca-nss-ecm/compile V=s -j1
+
+        echo "▶ verifying ECM ipk"
+        ECM_IPK=$(find bin/packages -name '*nss-ecm*.ipk' | wc -l)
+        if [ "$ECM_IPK" -eq 0 ]; then
+          echo "❌ ECM build failed: no ipk generated"
+          exit 1
+        fi
+        echo "✅ ECM ipk generated"
 
     - name: Download Packages
       run: |
@@ -124,9 +127,21 @@ jobs:
         cd openwrt
         make -j$(nproc) || make -j1 V=s
 
+    - name: Final NSS Sanity Check
+      run: |
+        cd openwrt
+        for p in nss-drv nss-ecm; do
+          find bin/packages -name "*$p*.ipk" | grep -q . || {
+            echo "❌ missing $p ipk"
+            exit 1
+          }
+        done
+        echo "✅ NSS stack OK"
+
     - name: Upload Firmware
       if: success() && env.UPLOAD_FIRMWARE == 'true'
       uses: actions/upload-artifact@v4
       with:
         name: Swaiot-CPE-S10-Firmware
         path: openwrt/bin/targets/ipq807x/*
+
