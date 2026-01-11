@@ -80,6 +80,7 @@ jobs:
         grep -i rust .config || echo "OK: no rust enabled"
         echo "==== NSS DRIVER CHECK ===="
         grep CONFIG_PACKAGE_kmod-qca-nss-drv .config || echo "WARN: NSS driver not in config"
+        echo 'CONFIG_PACKAGE_kmod-qca-nss-drv=y' >> .config
     
     - name: Fix qca-nss-ecm Dependency
       run: |
@@ -93,7 +94,7 @@ jobs:
         # 2. 修改编译命令以传递依赖包的符号表
         # KBUILD_EXTRA_SYMBOLS 路径中的通配符应匹配源码目录名
         sed -i '/define Build\/Compile/,/endef/ {
-            s|$(MAKE) -C "$(LINUX_DIR)"|& KBUILD_EXTRA_SYMBOLS="$(TOPDIR)/build_dir/target-*/*qca-nss-drv*/Module.symvers"|
+            s|$(MAKE) -C "$(LINUX_DIR)"|& KBUILD_EXTRA_SYMBOLS="$(TOPDIR)/build_dir/target-*/*qca-nss-drv*/Module.symvers"
         }' "$ECM_MAKEFILE"
         
         echo "已修复依赖配置。将依赖包 'qca-nss-drv' 的符号表传递给 'qca-nss-ecm'。"
@@ -101,13 +102,9 @@ jobs:
     - name: Find Correct NSS Driver Package Name
       run: |
         cd openwrt
-        echo "=== 确认包状态 ==="
-        echo "列表显示存在: kmod-qca-nss-drv (核心驱动)"
-        echo "对应源码目录: qca-nss-drv"
-        echo "=== 诊断结论 ==="
-        echo "1. 包名 'kmod-qca-nss-drv' 正确。"
-        echo "2. 需要确保它在 .config 中被启用。"
-
+        echo "包名已确认: kmod-qca-nss-drv (源码目录: qca-nss-drv)"
+        echo "现在请应用后续修复。"
+    
     - name: Compile qca-nss-ecm with Fixed Symbols
       run: |
         cd openwrt
