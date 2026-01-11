@@ -93,7 +93,21 @@ jobs:
         }' "$ECM_MAKEFILE"
         
         echo "已修复 $ECM_MAKEFILE 的依赖配置"
-
+    
+    - name: Find Correct NSS Driver Package Name
+      run: |
+        cd openwrt
+        echo “=== 列出 nss_packages feed 中已安装的包 ===”
+        ./scripts/feeds list -r nss_packages | grep -i “nss.*drv” || echo “(未找到相关包)”
+        
+        echo -e “\n=== 检查 package/feeds/nss_packages 目录下的实际内容 ===”
+        ls -la package/feeds/nss_packages/ | grep -i “nss” || echo “(未找到相关目录)”
+        
+        echo -e “\n=== 建议：尝试编译以下常见包名 ===”
+        echo “如果上方列表为空，可以手动尝试以下常见包名：”
+        echo “1. make package/feeds/nss_packages/qca-nss-drv/compile”
+        echo “2. make package/feeds/nss_packages/qca-nss-drv-ppe/compile”
+        echo “3. make package/feeds/nss_packages/kmod-qca-nss-drv-ppe/compile”
     - name: Compile NSS Driver Dependency (强制优先)
       run: |
         cd openwrt
