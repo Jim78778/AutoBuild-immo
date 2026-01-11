@@ -10,6 +10,7 @@ env:
   REPO_URL: https://github.com/Jim78778/immortalwrt-ipq.git
   REPO_BRANCH: Jim78778-patch-1
   CONFIG_FILE: ci.config
+  FEEDS_CONF: feeds.conf.default
   TZ: Asia/Shanghai
   UPLOAD_FIRMWARE: true
 
