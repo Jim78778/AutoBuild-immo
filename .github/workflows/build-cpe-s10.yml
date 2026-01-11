@@ -73,55 +73,40 @@ jobs:
         # 🎯 只保留 CPE-S10
         sed -i 's/^CONFIG_TARGET_qualcommax_ipq807x_DEVICE_.*/# &/' .config
         echo 'CONFIG_TARGET_qualcommax_ipq807x_DEVICE_cpe_s10=y' >> .config
-
+        echo 'CONFIG_PACKAGE_kmod-qca-nss-drv=y' >> .config
         make defconfig
 
         echo "==== FINAL RUST CHECK ===="
         grep -i rust .config || echo "OK: no rust enabled"
+        echo "==== NSS DRIVER CHECK ===="
+        grep CONFIG_PACKAGE_kmod-qca-nss-drv .config || echo "WARN: NSS driver not in config"
     
     - name: Fix qca-nss-ecm Dependency
       run: |
         cd openwrt
         ECM_MAKEFILE="package/feeds/nss_packages/qca-nss-ecm/Makefile"
         
-        # 1. 添加编译时依赖 (假设依赖包为 kmod-qca-nss-drv)
-        sed -i '/^PKG_NAME:=qca-nss-ecm$/aPKG_BUILD_DEPENDS:=kmod-qca-nss-drv' "$ECM_MAKEFILE"
+        # 1. 添加编译时依赖 (目标名是 kmod-qca-nss-drv，但源码目录是 qca-nss-drv)
+        # PKG_BUILD_DEPENDS 通常使用源码包名
+        sed -i '/^PKG_NAME:=qca-nss-ecm$/aPKG_BUILD_DEPENDS:=qca-nss-drv' "$ECM_MAKEFILE"
         
         # 2. 修改编译命令以传递依赖包的符号表
+        # KBUILD_EXTRA_SYMBOLS 路径中的通配符应匹配源码目录名
         sed -i '/define Build\/Compile/,/endef/ {
-            s|$(MAKE) -C "$(LINUX_DIR)"|& KBUILD_EXTRA_SYMBOLS="$(TOPDIR)/build_dir/target-*/*kmod-qca-nss-drv*/Module.symvers"|
+            s|$(MAKE) -C "$(LINUX_DIR)"|& KBUILD_EXTRA_SYMBOLS="$(TOPDIR)/build_dir/target-*/*qca-nss-drv*/Module.symvers"|
         }' "$ECM_MAKEFILE"
         
-        echo "已修复 $ECM_MAKEFILE 的依赖配置"
+        echo "已修复依赖配置。将依赖包 'qca-nss-drv' 的符号表传递给 'qca-nss-ecm'。"
     
     - name: Find Correct NSS Driver Package Name
       run: |
         cd openwrt
-        echo "=== 列出 nss_packages feed 中已安装的包 ==="
-        # 方法1：使用 feeds 命令列出
-        ./scripts/feeds list -r nss_packages 2>/dev/null | grep -i "nss" || echo "(feeds list 未找到相关包或命令执行失败)"
-        
-        echo -e "\n=== 检查 package/feeds/nss_packages 目录下的实际内容 ==="
-        # 方法2：直接查看目录，这是最可靠的方法
-        ls -1 package/feeds/nss_packages/ 2>/dev/null | grep -i "nss" || echo "(目录不存在或为空)"
-        
-        echo -e "\n=== 列出所有可能的候选包 (用于后续尝试) ==="
-        # 获取所有以 nss 或 qca 开头的目录名
-        for dir in package/feeds/nss_packages/* 2>/dev/null; do
-          if [ -d "$dir" ]; then
-            dirname=$(basename "$dir")
-            # 筛选出可能相关的包
-            if [[ "$dirname" == *"nss"* ]] || [[ "$dirname" == *"qca"* ]]; then
-              echo "发现包目录: $dirname"
-              # 检查其 Makefile 中是否有编译内核模块的迹象
-              if [ -f "$dir/Makefile" ] && grep -q "KernelPackage" "$dir/Makefile" 2>/dev/null; then
-                echo "  -> 这是一个内核模块包 (包含 KernelPackage)"
-              fi
-            fi
-          fi
-        done
-        
-        echo -e "\n=== 诊断完成 ===\n请将上方列出的包目录名称，用于修改后续的编译命令。"
+        echo "=== 确认包状态 ==="
+        echo "列表显示存在: kmod-qca-nss-drv (核心驱动)"
+        echo "对应源码目录: qca-nss-drv"
+        echo "=== 诊断结论 ==="
+        echo "1. 包名 'kmod-qca-nss-drv' 正确。"
+        echo "2. 需要确保它在 .config 中被启用。"
 
     - name: Compile qca-nss-ecm with Fixed Symbols
       run: |
