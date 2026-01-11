@@ -32,6 +32,15 @@ jobs:
           rsync unzip zlib1g-dev file wget \
           libelf-dev ecj fastjar
 
+    - name: Free Disk Space
+      run: |
+        sudo rm -rf /usr/share/dotnet
+        sudo rm -rf /usr/local/lib/android
+        sudo rm -rf /opt/ghc
+        sudo rm -rf /usr/local/share/boost
+        sudo apt clean
+        df -h
+
     - name: Clone ImmortalWrt Source
       run: |
         git clone --depth=1 $REPO_URL -b $REPO_BRANCH openwrt
