@@ -58,54 +58,74 @@ jobs:
     - name: Load CI Config (single device, rust killed)
       run: |
         cd openwrt
-
         if [ ! -f "$GITHUB_WORKSPACE/$CONFIG_FILE" ]; then
           echo "❌ ci.config not found"
           exit 1
         fi
-
         cp $GITHUB_WORKSPACE/$CONFIG_FILE .config
-
-        # 🚫 强制禁用 Rust（双保险）
         sed -i 's/CONFIG_RUST=y/# CONFIG_RUST is not set/' .config
         sed -i 's/CONFIG_RUST_TOOLCHAIN=y/# CONFIG_RUST_TOOLCHAIN is not set/' .config
-
-        # 🎯 只保留 CPE-S10
         sed -i 's/^CONFIG_TARGET_qualcommax_ipq807x_DEVICE_.*/# &/' .config
         echo 'CONFIG_TARGET_qualcommax_ipq807x_DEVICE_cpe_s10=y' >> .config
-        
-        # 🔑 【最关键的一步】启用 NSS 核心驱动包，必须在 make defconfig 之前
         echo 'CONFIG_PACKAGE_kmod-qca-nss-drv=y' >> .config
-
         make defconfig
+        echo "==== 配置检查 ===="
+        grep CONFIG_PACKAGE_kmod-qca-nss-drv .config || echo "状态: 未启用"
 
-        echo "==== FINAL RUST CHECK ===="
-        grep -i rust .config || echo "OK: no rust enabled"
-        echo "==== NSS DRIVER CHECK ===="
-        grep CONFIG_PACKAGE_kmod-qca-nss-drv .config || echo "WARN: NSS driver not in config"
-
-    - name: 修复 qca-nss-ecm 依赖
+    - name: 诊断并修复NSS符号依赖
       run: |
         cd openwrt
-        ECM_MAKEFILE="package/feeds/nss_packages/qca-nss-ecm/Makefile"
+        echo "=== 步骤1: 强制启用核心驱动包 ==="
+        sed -i '/CONFIG_PACKAGE_kmod-qca-nss-drv/d' .config
+        echo 'CONFIG_PACKAGE_kmod-qca-nss-drv=y' >> .config
         
-        echo "正在修复 $ECM_MAKEFILE 的依赖关系..."
+        echo "=== 步骤2: 查找真正的符号表文件 ==="
+        SYM_PATH=$(find build_dir -name "Module.symvers" -path "*kmod-qca-nss-drv-*" 2>/dev/null | head -1)
         
-        # 1. 添加编译时依赖 (使用源码目录名)
-        if ! grep -q "PKG_BUILD_DEPENDS.*qca-nss-drv" "$ECM_MAKEFILE"; then
-          sed -i '/^PKG_NAME:=qca-nss-ecm$/aPKG_BUILD_DEPENDS:=qca-nss-drv' "$ECM_MAKEFILE"
-          echo "已添加 PKG_BUILD_DEPENDS:=qca-nss-drv"
+        if [ -z "$SYM_PATH" ]; then
+          echo "未找到已编译的符号表，将使用通配符路径。"
+          SYM_PATH="\$(TOPDIR)/build_dir/target-*/kmod-qca-nss-drv-*/Module.symvers"
+        else
+          echo "找到符号表: $SYM_PATH"
+          if grep -q "nss_rmnet_rx_get_ifnum" "$SYM_PATH"; then
+            echo "所需符号已存在。"
+          fi
         fi
         
-        # 2. 修改编译命令以传递依赖包的符号表
-        # 查找 Build/Compile 段落中的 make 命令，添加 KBUILD_EXTRA_SYMBOLS 参数
-        sed -i '/define Build\/Compile/,/endef/ {
-          /^[[:space:]]*\$(MAKE)[[:space:]]+-C[[:space:]]+"\$(LINUX_DIR)"/ {
-            s/\([[:space:]]*\$(MAKE)[[:space:]]+-C[[:space:]]+"\$(LINUX_DIR)"\)/\1 KBUILD_EXTRA_SYMBOLS="\$(TOPDIR)\/build_dir\/target-*\/qca-nss-drv-*\/Module.symvers"/
-          }
-        }' "$ECM_MAKEFILE"
+        echo "=== 步骤3: 修复 ecm Makefile (关键修正) ==="
+        ECM_MAKEFILE="package/feeds/nss_packages/qca-nss-ecm/Makefile"
         
-        echo "依赖修复完成。编译时将从 qca-nss-drv 获取符号表。"
+        # 1. 清理旧配置并添加依赖
+        sed -i '/PKG_BUILD_DEPENDS.*qca-nss-drv/d' "$ECM_MAKEFILE"
+        sed -i '/^PKG_NAME:=qca-nss-ecm$/aPKG_BUILD_DEPENDS:=kmod-qca-nss-drv' "$ECM_MAKEFILE"
+        
+        # 2. 创建临时修复脚本，避免YAML格式问题
+        cat > /tmp/fix_ecm.sh << 'EOF'
+        #!/bin/bash
+        MAKEFILE="$1"
+        SYM_PATH="$2"
+        
+        # 使用awk安全地插入KBUILD_EXTRA_SYMBOLS，这是最可靠的方法
+        awk -v sym_path="$SYM_PATH" '
+        /define Build\/Compile/ { in_block=1; print $0; next }
+        in_block && /^[[:space:]]*\$(MAKE)[[:space:]]+-C[[:space:]]+"\$(LINUX_DIR)"/ {
+          print $0 " KBUILD_EXTRA_SYMBOLS=\"" sym_path "\""
+          inserted=1
+          next
+        }
+        in_block && /^endef/ {
+          if (!inserted) {
+            print "\tKBUILD_EXTRA_SYMBOLS=\"" sym_path "\""
+          }
+          in_block=0
+          inserted=0
+        }
+        { print $0 }
+        ' "$MAKEFILE" > "$MAKEFILE.fixed" && mv "$MAKEFILE.fixed" "$MAKEFILE"
+        EOF
+        
+        bash /tmp/fix_ecm.sh "$ECM_MAKEFILE" "$SYM_PATH"
+        echo "✅ 修复完成。符号表路径: $SYM_PATH""
 
     - name: Download Packages
       run: |
