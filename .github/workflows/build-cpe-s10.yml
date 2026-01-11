@@ -102,8 +102,28 @@ jobs:
     - name: Find Correct NSS Driver Package Name
       run: |
         cd openwrt
-        echo "包名已确认: kmod-qca-nss-drv (源码目录: qca-nss-drv)"
-        echo "现在请应用后续修复。"
+        echo "=== 核心包名确认 ==="
+        echo "编译目标: kmod-qca-nss-drv"
+        echo "源码目录: qca-nss-drv"
+        
+        echo -e "\n=== 关键状态检查 ==="
+        # 检查1: 该包是否在.config中启用 (这是此前失败的主因)
+        if grep -q "^CONFIG_PACKAGE_kmod-qca-nss-drv=y" .config 2>/dev/null; then
+          echo "✅ 配置状态: 已在 .config 中启用"
+        else
+          echo "❌ 配置状态: **未在 .config 中启用**"
+          echo "   请确保在 'Load CI Config' 步骤中已添加："
+          echo "   echo 'CONFIG_PACKAGE_kmod-qca-nss-drv=y' >> .config"
+        fi
+        
+        # 检查2: 源码目录是否存在
+        if [ -d "package/feeds/nss_packages/qca-nss-drv" ]; then
+          echo "✅ 源码目录: 存在"
+        else
+          echo "❌ 源码目录: 不存在"
+        fi
+        
+        echo -e "\n诊断完成。请根据上方检查结果进行后续操作。"
     
     - name: Compile qca-nss-ecm with Fixed Symbols
       run: |
