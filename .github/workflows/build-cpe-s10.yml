@@ -1,16 +1,21 @@
-name: Build Swaiot CPE-S10 ImmortalWrt
+name: Build Swaiot CPE-S10 (ImmortalWrt)
 
 on:
   workflow_dispatch:
   push:
     branches:
-      - patch-1
+      - main
 
 env:
+  # 👉 重要：源码仓库
   REPO_URL: https://github.com/Jim78778/immortalwrt-ipq.git
+
+  # 👉 重要：必须是含 DTS / BDF 的分支
   REPO_BRANCH: Jim78778-patch-1
+
+  # 👉 AutoBuild-immo 仓库里的配置文件
   CONFIG_FILE: ci.config
-  FEEDS_CONF: feeds.conf.default
+
   TZ: Asia/Shanghai
   UPLOAD_FIRMWARE: true
 
@@ -19,17 +24,11 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-    - name: Checkout CI Repo
+    - name: Checkout AutoBuild Repo
       uses: actions/checkout@v4
 
     - name: Set Timezone
       run: sudo timedatectl set-timezone "$TZ"
-
-    - name: Free Disk Space (IMPORTANT)
-      run: |
-        sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
-        sudo apt clean
-        df -h
 
     - name: Install Build Dependencies
       run: |
@@ -40,22 +39,38 @@ jobs:
           rsync unzip zlib1g-dev file wget \
           libelf-dev ecj fastjar
 
+    # =========================================================
+    # Clone ImmortalWrt Source (关键：确认分支)
+    # =========================================================
     - name: Clone ImmortalWrt Source
       run: |
         git clone --depth=1 $REPO_URL -b $REPO_BRANCH openwrt
+        cd openwrt
+        echo "==== IMMORTALWRT SOURCE CHECK ===="
+        git log -1 --oneline
+        echo "================================="
 
+    # =========================================================
+    # Add QModem feed
+    # =========================================================
     - name: Add QModem feed
       run: |
         cd openwrt
         echo "src-git qmodem https://github.com/FUjr/QModem.git" >> feeds.conf.default
 
+    # =========================================================
+    # Update & Install Feeds
+    # =========================================================
     - name: Update & Install Feeds
       run: |
         cd openwrt
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
-    - name: Load CI Config (single device, rust killed)
+    # =========================================================
+    # Load CI config (single device + rust kill)
+    # =========================================================
+    - name: Load CI Config (CPE-S10 only)
       run: |
         cd openwrt
 
@@ -66,33 +81,44 @@ jobs:
 
         cp $GITHUB_WORKSPACE/$CONFIG_FILE .config
 
-        # 🚫 强制禁用 Rust（双保险）
-        sed -i 's/CONFIG_RUST=y/# CONFIG_RUST is not set/' .config
-        sed -i 's/CONFIG_RUST_TOOLCHAIN=y/# CONFIG_RUST_TOOLCHAIN is not set/' .config
-
-        # 🎯 只保留 CPE-S10
+        # ❗ 强制只编一个设备（防止 mx4200 / 其他机型）
         sed -i 's/^CONFIG_TARGET_qualcommax_ipq807x_DEVICE_.*/# &/' .config
         echo 'CONFIG_TARGET_qualcommax_ipq807x_DEVICE_cpe_s10=y' >> .config
 
-        make defconfig
+        # 🚫 Rust 完全禁用（避免 host rust / checksum / vendor 错）
+        sed -i 's/CONFIG_RUST=y/# CONFIG_RUST is not set/' .config
+        sed -i 's/CONFIG_RUST_TOOLCHAIN=y/# CONFIG_RUST_TOOLCHAIN is not set/' .config
 
-        echo "==== FINAL RUST CHECK ===="
-        grep -i rust .config || echo "OK: no rust enabled"
+        yes "" | make defconfig
 
+        echo "==== FINAL CONFIG CHECK ===="
+        grep -E "cpe_s10|RUST" .config || true
+        echo "============================"
+
+    # =========================================================
+    # Download packages (并发小一点防止爆盘)
+    # =========================================================
     - name: Download Packages
       run: |
         cd openwrt
-        make download -j$(nproc)
+        make download -j2
 
+    # =========================================================
+    # Build Firmware（先并行，失败自动降级）
+    # =========================================================
     - name: Compile Firmware
       run: |
         cd openwrt
         make -j$(nproc) || make -j1 V=s
 
+    # =========================================================
+    # Upload Firmware
+    # =========================================================
     - name: Upload Firmware
       if: success() && env.UPLOAD_FIRMWARE == 'true'
       uses: actions/upload-artifact@v4
       with:
         name: Swaiot-CPE-S10-Firmware
-        path: openwrt/bin/targets/ipq807x/*
+        path: openwrt/bin/targets/ipq807x/*/
+
 
