@@ -36,7 +36,7 @@ jobs:
     - name: Merge device config
       run: |
         cd openwrt
-        cat swaiot.config >> .config
+        cat ../swaiot.config >> .config
 
     # 🔴 明确检查 kmod-mhi-wwan 是否可选
     - name: Check MHI options
