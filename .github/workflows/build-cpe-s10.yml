@@ -54,7 +54,7 @@ jobs:
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
-    - name: Load Config (CPE-S10 only, no Rust)
+    - name: Load Config (CPE-S10, NSS Stable, no ECM / no Rust)
       run: |
         cd openwrt
 
@@ -65,83 +65,60 @@ jobs:
 
         cp $GITHUB_WORKSPACE/$CONFIG_FILE .config
 
-        # 禁用 Rust（彻底）
-        sed -i 's/^CONFIG_RUST.*$/# &/' .config
-        sed -i 's/^CONFIG_RUST_TOOLCHAIN.*$/# &/' .config
-
-        # 只保留 CPE-S10
+        # ===== 强制只编译 CPE-S10 =====
         sed -i 's/^CONFIG_TARGET_qualcommax_ipq807x_DEVICE_.*/# &/' .config
         echo 'CONFIG_TARGET_qualcommax_ipq807x_DEVICE_cpe_s10=y' >> .config
 
-        # 启用 NSS 核心驱动
-        echo 'CONFIG_PACKAGE_kmod-qca-nss-drv=y' >> .config
+        # ===== 硬禁 Rust（防止被 Passwall / 依赖拉起）=====
+        sed -i 's/^CONFIG_RUST.*/# &/' .config
+        sed -i 's/^CONFIG_PACKAGE_rust.*/# &/' .config
+        sed -i 's/^CONFIG_PACKAGE_cargo.*/# &/' .config
+
+        # ===== 明确禁用 ECM（关键）=====
+        sed -i 's/^CONFIG_PACKAGE_kmod-qca-nss-ecm.*/# &/' .config
+        echo 'CONFIG_ECM_INTERFACE_RAWIP_ENABLE=n' >> .config
+        echo 'CONFIG_ECM_INTERFACE_RMNET_ENABLE=n' >> .config
 
         make defconfig
 
         echo "==== FINAL CONFIG CHECK ===="
-        grep -i rust .config || echo "OK: rust disabled"
         grep CONFIG_TARGET_qualcommax_ipq807x_DEVICE_cpe_s10 .config
         grep CONFIG_PACKAGE_kmod-qca-nss-drv .config
+        ! grep -q qca-nss-ecm .config && echo "✅ ECM disabled"
+        ! grep -i rust .config && echo "✅ Rust disabled"
 
-    - name: Compile qca-nss-drv (SERIAL)
-      run: |
-        cd openwrt
-        echo "▶ compiling qca-nss-drv (j1)"
-        make package/feeds/nss_packages/qca-nss-drv/compile V=s -j1
-
-        echo "▶ locating Module.symvers"
-        NSS_SYMS=$(find build_dir/target-* \
-          -path '*qca-nss-drv*' \
-          -name Module.symvers | head -n1)
-
-        if [ -z "$NSS_SYMS" ]; then
-          echo "❌ NSS Module.symvers NOT FOUND"
-          exit 1
-        fi
-
-        echo "✅ NSS Module.symvers = $NSS_SYMS"
-        echo "NSS_SYMS=$NSS_SYMS" >> $GITHUB_ENV
-
-    - name: Compile qca-nss-ecm (SERIAL, injected symbols)
-      run: |
-        cd openwrt
-        echo "▶ compiling qca-nss-ecm (j1)"
-        export KBUILD_EXTRA_SYMBOLS="$NSS_SYMS"
-        make package/feeds/nss_packages/qca-nss-ecm/compile V=s -j1
-
-        echo "▶ verifying ECM ipk"
-        ECM_IPK=$(find bin/packages -name '*nss-ecm*.ipk' | wc -l)
-        if [ "$ECM_IPK" -eq 0 ]; then
-          echo "❌ ECM build failed: no ipk generated"
-          exit 1
-        fi
-        echo "✅ ECM ipk generated"
-
-    - name: Download Packages
+    - name: Download Sources
       run: |
         cd openwrt
         make download -j$(nproc)
 
-    - name: Compile Firmware
+    - name: Build Firmware
       run: |
         cd openwrt
         make -j$(nproc) || make -j1 V=s
 
-    - name: Final NSS Sanity Check
+    - name: NSS / QModem Sanity Check
       run: |
         cd openwrt
-        for p in nss-drv nss-ecm; do
-          find bin/packages -name "*$p*.ipk" | grep -q . || {
-            echo "❌ missing $p ipk"
-            exit 1
-          }
-        done
-        echo "✅ NSS stack OK"
+
+        echo "▶ checking NSS modules"
+        find bin/packages -name '*nss-drv*.ipk' | grep -q . || {
+          echo "❌ kmod-qca-nss-drv missing"
+          exit 1
+        }
+
+        echo "▶ checking QModem"
+        find bin/packages -name '*qmodem*.ipk' | grep -q . || {
+          echo "❌ qmodem ipk missing"
+          exit 1
+        }
+
+        echo "✅ NSS + QModem OK"
 
     - name: Upload Firmware
       if: success() && env.UPLOAD_FIRMWARE == 'true'
       uses: actions/upload-artifact@v4
       with:
         name: Swaiot-CPE-S10-Firmware
-        path: openwrt/bin/targets/ipq807x/*
+        path: openwrt/bin/targets/qualcommax/ipq807x/*
 
