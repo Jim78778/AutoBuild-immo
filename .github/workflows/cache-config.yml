@@ -1,0 +1,34 @@
+name: Cache Management
+
+on:
+  schedule:
+    - cron: '0 0 * * 0'  # 每周清理一次
+  workflow_dispatch:
+
+jobs:
+  cleanup-cache:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Cleanup old caches
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const caches = await github.rest.actions.getActionsCacheList({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+            });
+            
+            const now = Date.now();
+            for (const cache of caches.data.actions_caches) {
+              const createdAt = new Date(cache.created_at).getTime();
+              const ageInDays = (now - createdAt) / (1000 * 60 * 60 * 24);
+              
+              if (ageInDays > 7) {
+                console.log(`Deleting cache: ${cache.key} (${ageInDays.toFixed(1)} days old)`);
+                await github.rest.actions.deleteActionsCacheById({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  cache_id: cache.id,
+                });
+              }
+            }
