@@ -46,6 +46,7 @@ jobs:
     - name: Add QModem feed
       run: |
         cd openwrt
+        sed -i '/qmodem/d' feeds.conf.default
         echo "src-git qmodem https://github.com/FUjr/QModem.git" >> feeds.conf.default
 
     - name: Update & Install Feeds
@@ -54,7 +55,7 @@ jobs:
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
-    - name: Load Config (CPE-S10, NSS Stable, no ECM / no Rust)
+    - name: Load Config (CPE-S10 / NSS / QModem / no Rust / no ECM)
       run: |
         cd openwrt
 
@@ -65,27 +66,46 @@ jobs:
 
         cp $GITHUB_WORKSPACE/$CONFIG_FILE .config
 
-        # ===== 强制只编译 CPE-S10 =====
+        # ===== 只编译 Swaiot CPE-S10 =====
         sed -i 's/^CONFIG_TARGET_qualcommax_ipq807x_DEVICE_.*/# &/' .config
         echo 'CONFIG_TARGET_qualcommax_ipq807x_DEVICE_cpe_s10=y' >> .config
 
-        # ===== 硬禁 Rust（防止被 Passwall / 依赖拉起）=====
+        # ===== 启用 PCIe / MHI / WWAN（QModem 关键）=====
+        echo 'CONFIG_PCI=y' >> .config
+        echo 'CONFIG_PCIE_QCOM=y' >> .config
+        echo 'CONFIG_MHI_BUS=y' >> .config
+        echo 'CONFIG_MHI_WWAN=y' >> .config
+        echo 'CONFIG_MHI_NET=y' >> .config
+
+        # ===== 启用 NSS（只要 drv，不要 ECM）=====
+        echo 'CONFIG_PACKAGE_kmod-qca-nss-drv=y' >> .config
+        sed -i 's/^CONFIG_PACKAGE_kmod-qca-nss-ecm.*/# &/' .config
+
+        # ===== 强制禁用 ECM 所有接口 =====
+        echo 'CONFIG_ECM_INTERFACE_RAWIP_ENABLE=n' >> .config
+        echo 'CONFIG_ECM_INTERFACE_RMNET_ENABLE=n' >> .config
+
+        # ===== 彻底禁用 Rust（防止 feeds 拉起）=====
         sed -i 's/^CONFIG_RUST.*/# &/' .config
         sed -i 's/^CONFIG_PACKAGE_rust.*/# &/' .config
         sed -i 's/^CONFIG_PACKAGE_cargo.*/# &/' .config
 
-        # ===== 明确禁用 ECM（关键）=====
-        sed -i 's/^CONFIG_PACKAGE_kmod-qca-nss-ecm.*/# &/' .config
-        echo 'CONFIG_ECM_INTERFACE_RAWIP_ENABLE=n' >> .config
-        echo 'CONFIG_ECM_INTERFACE_RMNET_ENABLE=n' >> .config
-
         make defconfig
 
         echo "==== FINAL CONFIG CHECK ===="
-        grep CONFIG_TARGET_qualcommax_ipq807x_DEVICE_cpe_s10 .config
-        grep CONFIG_PACKAGE_kmod-qca-nss-drv .config
-        ! grep -q qca-nss-ecm .config && echo "✅ ECM disabled"
+        grep -E "CONFIG_TARGET_qualcommax_ipq807x_DEVICE_cpe_s10=y" .config \
+          || { echo "❌ CPE-S10 not selected"; exit 1; }
+
+        grep -E "CONFIG_PACKAGE_kmod-qca-nss-drv(=y|=m)" .config \
+          || { echo "❌ NSS driver missing"; exit 1; }
+
+        grep -E "CONFIG_MHI_BUS=y" .config \
+          || { echo "❌ MHI not enabled"; exit 1; }
+
         ! grep -i rust .config && echo "✅ Rust disabled"
+        ! grep -i qca-nss-ecm .config && echo "✅ ECM disabled"
+
+        echo "✅ config sanity OK"
 
     - name: Download Sources
       run: |
@@ -101,7 +121,7 @@ jobs:
       run: |
         cd openwrt
 
-        echo "▶ checking NSS modules"
+        echo "▶ checking NSS driver"
         find bin/packages -name '*nss-drv*.ipk' | grep -q . || {
           echo "❌ kmod-qca-nss-drv missing"
           exit 1
@@ -121,4 +141,5 @@ jobs:
       with:
         name: Swaiot-CPE-S10-Firmware
         path: openwrt/bin/targets/qualcommax/ipq807x/*
+
 
