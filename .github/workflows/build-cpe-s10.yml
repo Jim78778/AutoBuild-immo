@@ -29,6 +29,38 @@ jobs:
       run: |
         git clone --depth=1 $REPO_URL -b $REPO_BRANCH openwrt
 
+    - name: Add kmod-mhi-wwan compatibility package
+      run: |
+        cd openwrt
+        mkdir -p package/kernel/mhi-compat
+        cat > package/kernel/mhi-compat/Makefile << 'EOF'
+        include $(TOPDIR)/rules.mk
+        include $(INCLUDE_DIR)/kernel.mk
+
+        PKG_NAME:=kmod-mhi-wwan
+        PKG_RELEASE:=1
+
+        include $(INCLUDE_DIR)/package.mk
+
+        define KernelPackage/mhi-wwan
+          SUBMENU:=Wireless Drivers
+          TITLE:=MHI WWAN compatibility package
+          DEPENDS:= \
+            +kmod-mhi-bus \
+            +kmod-mhi-pci-generic \
+            +kmod-mhi-wwan-ctrl \
+            +kmod-mhi-wwan-mbim
+          FILES:=
+          AUTOLOAD:=
+        endef
+
+        define KernelPackage/mhi-wwan/description
+         Compatibility virtual package for legacy kmod-mhi-wwan dependency.
+        endef
+
+        $(eval $(call KernelPackage,mhi-wwan))
+        EOF
+
     - name: Add QModem feed
       run: |
         cd openwrt
