@@ -69,6 +69,57 @@ jobs:
         cd openwrt
         echo "src-git qmodem https://github.com/FUjr/QModem.git" >> feeds.conf.default
 
+    - name: Add missing dependencies
+      run: |
+       cd ../immortalwrt
+    
+       echo "=== Adding missing dependencies ==="
+    
+       # 1. 添加 missing Python packages
+       echo "Adding missing Python packages..."
+    
+       # 检查这些包是否在 feeds 中
+       if ./scripts/feeds list | grep -q "python3-pysocks"; then
+       echo "python3-pysocks is available"
+       else
+       echo "python3-pysocks not in feeds, will be built from source"
+       # 如果需要，可以手动添加
+       fi
+    
+       if ./scripts/feeds list | grep -q "python3-unidecode"; then
+       echo "python3-unidecode is available"
+       else
+       echo "python3-unidecode not in feeds, will be built from source"
+       fi
+    
+        # 2. 确保 MHI 驱动被启用
+        echo "Ensuring MHI drivers are enabled..."
+    
+        # 创建或修改配置
+        if [ -f ".config" ]; then
+       # 添加 MHI 相关配置
+        echo "CONFIG_PACKAGE_kmod-mhi-bus=y" >> .config
+        echo "CONFIG_PACKAGE_kmod-mhi-wwan=y" >> .config
+        echo "CONFIG_PACKAGE_kmod-mhi-pci-generic=y" >> .config
+        echo "CONFIG_PACKAGE_kmod-mhi-netdev=y" >> .config
+        echo "CONFIG_PACKAGE_kmod-qrtr=y" >> .config
+        echo "CONFIG_PACKAGE_kmod-qrtr-mhi=y" >> .config
+      
+        # 添加 Python 包
+        echo "CONFIG_PACKAGE_python3-pysocks=y" >> .config
+        echo "CONFIG_PACKAGE_python3-unidecode=y" >> .config
+      
+        # 如果有 quectel-CM-5G 包
+        if ./scripts/feeds list | grep -q "quectel-CM-5G"; then
+        echo "CONFIG_PACKAGE_quectel-CM-5G=y" >> .config
+        else
+        echo "Note: quectel-CM-5G package not found in feeds"
+        fi
+       fi
+    
+        # 3. 重新运行 defconfig
+        make defconfig
+    
     - name: Update & install feeds
       run: |
         cd openwrt
