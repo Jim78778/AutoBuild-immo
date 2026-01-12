@@ -25,9 +25,7 @@ on:
 
 jobs:
   build:
-    runs-on: [self-hosted, linux, x64, high-performance]
-    # 或使用 GitHub 托管的大规格 runner
-    # runs-on: ubuntu-22.04-32core
+    runs-on: ubuntu-22.04-16core
     
     strategy:
       fail-fast: false
@@ -38,8 +36,8 @@ jobs:
     
     env:
       CCACHE_DIR: /tmp/ccache
-      CCACHE_MAXSIZE: 20G
-      MAKE_JOBS: ${{ github.event.inputs.parallel_jobs == '0' && '48' || github.event.inputs.parallel_jobs }}
+      CCACHE_MAXSIZE: 8G
+      MAKE_JOBS: ${{ github.event.inputs.parallel_jobs == '0' && '16' || github.event.inputs.parallel_jobs }}
       BUILD_TYPE: ${{ github.event.inputs.target || 'full' }}
       USE_CCACHE: ${{ github.event.inputs.use_ccache }}
       
@@ -102,20 +100,6 @@ jobs:
         echo "* soft nofile 100000" | sudo tee -a /etc/security/limits.conf
         echo "* hard nofile 200000" | sudo tee -a /etc/security/limits.conf
         sudo sysctl -p || true
-        
-    - name: Create tmpfs for build (if enough memory)
-      if: runner.os == 'Linux' && contains(runner.name, 'self-hosted')
-      run: |
-        # 检查内存大小，如果大于 32GB 则创建 tmpfs
-        MEM_GB=$(free -g | grep Mem | awk '{print $2}')
-        if [ $MEM_GB -gt 32 ]; then
-          echo "Detected $MEM_GB GB RAM, creating tmpfs..."
-          sudo mkdir -p /mnt/ramdisk
-          sudo mount -t tmpfs -o size=24G tmpfs /mnt/ramdisk
-          echo "tmpfs created at /mnt/ramdisk"
-        else
-          echo "Insufficient RAM for tmpfs ($MEM_GB GB), using disk"
-        fi
         
     - name: Clone ImmortalWrt with optimization
       run: |
