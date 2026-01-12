@@ -1,0 +1,361 @@
+name: Build CPE-S10 (MHI + QModem) Optimized
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Build target'
+        required: false
+        default: 'full'
+        type: choice
+        options:
+          - full
+          - kernel
+          - packages
+      parallel_jobs:
+        description: 'Parallel jobs (0=auto)'
+        required: false
+        default: '0'
+        type: string
+      use_ccache:
+        description: 'Enable CCache'
+        required: false
+        default: true
+        type: boolean
+
+jobs:
+  build:
+    runs-on: [self-hosted, linux, x64, high-performance]
+    # 或使用 GitHub 托管的大规格 runner
+    # runs-on: ubuntu-22.04-32core
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target_profile: "cpe-s10-mhi"
+            config_file: "swaiot.config"
+    
+    env:
+      CCACHE_DIR: /tmp/ccache
+      CCACHE_MAXSIZE: 20G
+      MAKE_JOBS: ${{ github.event.inputs.parallel_jobs == '0' && '48' || github.event.inputs.parallel_jobs }}
+      BUILD_TYPE: ${{ github.event.inputs.target || 'full' }}
+      USE_CCACHE: ${{ github.event.inputs.use_ccache }}
+      
+    steps:
+    - name: Check available resources
+      run: |
+        echo "=== System Information ==="
+        echo "CPU: $(lscpu | grep 'Model name' | cut -d: -f2 | xargs)"
+        echo "Cores: $(nproc)"
+        echo "Memory: $(free -h | grep Mem | awk '{print $2}')"
+        echo "Disk: $(df -h / | tail -1 | awk '{print $4}')"
+        echo "GitHub Runner: ${{ runner.os }} ${{ runner.arch }}"
+        echo "=========================="
+        
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        path: source
+        fetch-depth: 0
+        lfs: true
+        
+    - name: Setup build environment
+      run: |
+        # 使用高性能编译工具链
+        sudo apt update
+        sudo apt install -y \
+          build-essential \
+          clang-14 llvm-14 lld-14 \
+          gcc-12 g++-12 \
+          ccache \
+          pigz pbzip2 \
+          numactl \
+          python3.10 python3-pip python3-venv \
+          libncurses-dev libssl-dev zlib1g-dev \
+          git gettext rsync wget curl file \
+          unzip p7zip-full \
+          jq yq
+        
+        # 设置多版本编译器
+        sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 100
+        sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-12 100
+        sudo update-alternatives --install /usr/bin/cc cc /usr/bin/gcc-12 100
+        sudo update-alternatives --install /usr/bin/c++ c++ /usr/bin/g++-12 100
+        
+        # 设置 clang/lld 为备选链接器
+        sudo update-alternatives --install /usr/bin/ld ld /usr/bin/ld.gold 30
+        sudo update-alternatives --install /usr/bin/ld ld /usr/bin/ld.bfd 20
+        sudo update-alternatives --install /usr/bin/ld ld /usr/bin/lld-14 40
+        
+        # 配置 ccache
+        if [ "$USE_CCACHE" = "true" ]; then
+          ccache --set-config=max_size=20G
+          ccache --set-config=compression=true
+          ccache --set-config=compression_level=6
+          ccache -z  # 清空统计
+        fi
+        
+        # 提高系统限制
+        echo "fs.file-max = 1000000" | sudo tee -a /etc/sysctl.conf
+        echo "* soft nofile 100000" | sudo tee -a /etc/security/limits.conf
+        echo "* hard nofile 200000" | sudo tee -a /etc/security/limits.conf
+        sudo sysctl -p || true
+        
+    - name: Create tmpfs for build (if enough memory)
+      if: runner.os == 'Linux' && contains(runner.name, 'self-hosted')
+      run: |
+        # 检查内存大小，如果大于 32GB 则创建 tmpfs
+        MEM_GB=$(free -g | grep Mem | awk '{print $2}')
+        if [ $MEM_GB -gt 32 ]; then
+          echo "Detected $MEM_GB GB RAM, creating tmpfs..."
+          sudo mkdir -p /mnt/ramdisk
+          sudo mount -t tmpfs -o size=24G tmpfs /mnt/ramdisk
+          echo "tmpfs created at /mnt/ramdisk"
+        else
+          echo "Insufficient RAM for tmpfs ($MEM_GB GB), using disk"
+        fi
+        
+    - name: Clone ImmortalWrt with optimization
+      run: |
+        # 使用更快的镜像源
+        cd source
+        
+        # 如果有缓存，先恢复
+        if [ -f "../openwrt-cache.tar.gz" ]; then
+          echo "Restoring OpenWrt cache..."
+          tar -xzf ../openwrt-cache.tar.gz -C .. || true
+        fi
+        
+        if [ ! -d "../openwrt" ]; then
+          echo "Cloning ImmortalWrt..."
+          # 使用浅克隆 + 单分支以节省时间
+          git clone --depth=1 --branch=openwrt-23.05 \
+            --single-branch \
+            https://github.com/immortalwrt/immortalwrt.git ../openwrt
+            
+          # 如果克隆失败，尝试主分支
+          if [ $? -ne 0 ]; then
+            git clone --depth=1 \
+              https://github.com/immortalwrt/immortalwrt.git ../openwrt
+          fi
+        else
+          echo "OpenWrt directory exists, updating..."
+          cd ../openwrt
+          git pull --depth=1
+        fi
+        
+        # 应用补丁（如果有）
+        if [ -f "../source/patches" ]; then
+          echo "Applying patches..."
+          find ../source/patches -name "*.patch" | sort | while read patch; do
+            echo "Applying $patch"
+            patch -p1 -d . < "$patch" || true
+          done
+        fi
+        
+    - name: Setup OpenWrt environment
+      run: |
+        cd openwrt
+        
+        # 设置编译环境变量
+        export FORCE_UNSAFE_CONFIGURE=1
+        export SUBMAKE_JOBS=$MAKE_JOBS
+        
+        # 使用更快的下载镜像
+        if [ ! -f "feeds.conf.default.bak" ]; then
+          cp feeds.conf.default feeds.conf.default.bak
+          # 使用国内镜像（如果需要）
+          sed -i 's|github.com|hub.fastgit.org|g' feeds.conf.default || true
+          sed -i 's|git.openwrt.org|downloads.openwrt.org|g' feeds.conf.default || true
+        fi
+        
+        # 并行更新 feeds
+        echo "Updating feeds in parallel..."
+        ./scripts/feeds update -a > /dev/null 2>&1 &
+        FEEDS_PID=$!
+        
+        # 同时开始下载部分依赖
+        mkdir -p dl
+        if [ -f "../source/important_packages.txt" ]; then
+          cat ../source/important_packages.txt | xargs -P4 -I{} make package/{}/download || true
+        fi
+        
+        wait $FEEDS_PID
+        
+        echo "Installing feeds..."
+        ./scripts/feeds install -a
+        
+    - name: Apply configuration
+      run: |
+        cd openwrt
+        
+        # 加载基础配置
+        if [ -f "../source/ci.config" ]; then
+          cp ../source/ci.config .config
+        else
+          # 生成默认配置
+          make defconfig
+        fi
+        
+        # 合并设备特定配置
+        if [ -f "../source/${{ matrix.config_file }}" ]; then
+          echo "Merging device config..."
+          cat "../source/${{ matrix.config_file }}" >> .config
+          
+          # 特别确保 MHI 相关选项被启用
+          echo "CONFIG_PACKAGE_kmod-mhi-wwan=y" >> .config
+          echo "CONFIG_PACKAGE_kmod-mhi-netdev=y" >> .config
+          echo "CONFIG_PACKAGE_kmod-mhi-pci-generic=y" >> .config
+          echo "CONFIG_PACKAGE_kmod-qrtr=y" >> .config
+          echo "CONFIG_PACKAGE_kmod-qrtr-mhi=y" >> .config
+        fi
+        
+        # 优化编译选项
+        echo "# Performance optimizations" >> .config
+        echo "CONFIG_CCACHE=y" >> .config
+        echo "CONFIG_BUILD_LOG=y" >> .config
+        echo "CONFIG_SDK=y" >> .config
+        echo "CONFIG_USE_MKLIBS=n" >> .config
+        echo "CONFIG_STRIP_KERNEL_EXPORTS=y" >> .config
+        
+        # 验证配置
+        echo "Checking MHI configuration..."
+        grep -i "mhi\|MHI" .config || echo "No MHI config found"
+        
+    - name: Finalize configuration
+      run: |
+        cd openwrt
+        
+        # 使用 defconfig 清理和验证配置
+        echo "Running defconfig..."
+        make defconfig
+        
+        # 显示关键配置
+        echo "=== Important Configurations ==="
+        grep -E "TARGET_|SUBTARGET|PROFILE|CONFIG_TARGET|CONFIG_PACKAGE_kmod-(mhi|qrtr)" .config
+        echo "================================"
+        
+    - name: Download all dependencies (parallel)
+      run: |
+        cd openwrt
+        echo "Downloading all packages..."
+        
+        # 使用并行下载
+        make -j8 download || make download
+        
+        # 验证重要包
+        for pkg in kmod-mhi-wwan kmod-mhi-netdev kmod-qrtr; do
+          if [ -d "dl" ]; then
+            echo "Checking $pkg..."
+            find dl -name "*${pkg}*" -type f | head -5
+          fi
+        done
+        
+    - name: Build based on selected type
+      run: |
+        cd openwrt
+        
+        # 设置编译环境
+        export PATH="/usr/lib/ccache:$PATH"
+        
+        if [ "$USE_CCACHE" = "true" ]; then
+          export CCACHE_DIR="/tmp/ccache"
+          export CCACHE_BASEDIR="$(pwd)"
+          export CCACHE_COMPRESS=1
+          export CCACHE_SLOPPINESS="file_macro,include_file_mtime,time_macros"
+        fi
+        
+        # 根据构建类型选择编译目标
+        case "$BUILD_TYPE" in
+          "kernel")
+            echo "Building kernel only..."
+            /usr/bin/time -v make target/linux/{clean,compile} -j$MAKE_JOBS V=sc 2>&1 | tee build-kernel.log
+            ;;
+          "packages")
+            echo "Building packages only..."
+            /usr/bin/time -v make package/compile -j$MAKE_JOBS V=sc 2>&1 | tee build-packages.log
+            ;;
+          *)
+            echo "Building full firmware..."
+            /usr/bin/time -v make -j$MAKE_JOBS V=sc 2>&1 | tee build-full.log
+            ;;
+        esac
+        
+        # 显示 ccache 统计
+        if [ "$USE_CCACHE" = "true" ]; then
+          echo "=== CCache Statistics ==="
+          ccache -s
+          echo "========================="
+        fi
+        
+    - name: Verify build artifacts
+      run: |
+        cd openwrt
+        
+        echo "=== Build Artifacts ==="
+        find bin/targets -type f -name "*.bin" -o -name "*.img" | sort
+        
+        echo ""
+        echo "=== Kernel modules (MHI/QModem related) ==="
+        find bin -name "*mhi*" -o -name "*qrtr*" -o -name "*qmodem*" | sort || true
+        
+        echo ""
+        echo "=== Build Summary ==="
+        if [ -f "build-full.log" ]; then
+          echo "Errors: $(grep -c "Error" build-full.log || echo 0)"
+          echo "Warnings: $(grep -c "warning:" build-full.log || echo 0)"
+        fi
+        
+    - name: Cache OpenWrt source (for future runs)
+      if: always()
+      run: |
+        # 缓存 openwrt 目录以加速后续构建
+        if [ -d "openwrt" ] && [ -d "openwrt/.git" ]; then
+          echo "Creating source cache..."
+          tar -czf openwrt-source-cache.tar.gz \
+            --exclude="openwrt/dl" \
+            --exclude="openwrt/build_dir" \
+            --exclude="openwrt/staging_dir" \
+            --exclude="openwrt/tmp" \
+            openwrt
+        fi
+        
+    - name: Upload firmware artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: CPE-S10-firmware-${{ matrix.target_profile }}-${{ github.sha }}
+        path: |
+          openwrt/bin/targets/
+          openwrt/build-full.log
+          openwrt/.config
+        retention-days: 7
+        if-no-files-found: error
+        
+    - name: Upload debug artifacts
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: debug-files-${{ matrix.target_profile }}
+        path: |
+          openwrt/build-*.log
+          openwrt/.config
+          openwrt/tmp/
+        retention-days: 30
+        
+    - name: Cleanup
+      if: always()
+      run: |
+        # 保留 ccache
+        if [ "$USE_CCACHE" = "true" ]; then
+          echo "CCache stats:"
+          ccache -s
+        fi
+        
+        # 如果有 tmpfs，卸载
+        if mountpoint -q /mnt/ramdisk; then
+          sudo umount /mnt/ramdisk || true
+        fi
+        
+        echo "Build completed at: $(date)"
