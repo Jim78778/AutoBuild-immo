@@ -71,7 +71,7 @@ jobs:
 
     - name: Add missing dependencies
       run: |
-       cd ../openwrt
+       cd openwrt
     
        echo "=== Adding missing dependencies ==="
     
