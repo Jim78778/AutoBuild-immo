@@ -1,4 +1,4 @@
-name: Build Swaiot CPE-S10 ImmortalWrt (NSS Stable no-ECM)
+name: Build CPE-S10 ImmortalWrt (kernel-safe)
 
 on:
   workflow_dispatch:
@@ -40,7 +40,7 @@ jobs:
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
-    - name: Load config & hard cleanup
+    - name: Load config & sanitize
       run: |
         cd openwrt
         cp $GITHUB_WORKSPACE/$CONFIG_FILE .config
@@ -49,11 +49,11 @@ jobs:
         sed -i 's/^CONFIG_TARGET_qualcommax_ipq807x_DEVICE_.*/# &/' .config
         echo 'CONFIG_TARGET_qualcommax_ipq807x_DEVICE_cpe_s10=y' >> .config
 
-        # 禁 Rust
+        # 禁 Rust（防 vendor 炸）
         sed -i 's/^CONFIG_RUST.*/# &/' .config
         sed -i 's/^CONFIG_PACKAGE_rust.*/# &/' .config
 
-        # ❌ 移除 ECM + clients（关键）
+        # 移除 ECM / nss-clients
         rm -rf feeds/nss_packages/qca-nss-ecm
         rm -rf feeds/nss_packages/qca-nss-clients
 
@@ -61,7 +61,10 @@ jobs:
         sed -i 's/^CONFIG_PACKAGE_kmod-qca-nss-clients.*/# &/' .config
         sed -i 's/^CONFIG_ECM_.*/# &/' .config
 
+        # ⭐ 关键三连（顺序不能错）
         make defconfig
+        make olddefconfig
+        make oldconfig </dev/null
 
     - name: Download
       run: |
@@ -76,6 +79,5 @@ jobs:
     - name: Upload
       uses: actions/upload-artifact@v4
       with:
-        name: CPE-S10-NSS-noECM
+        name: CPE-S10-kernel-safe
         path: openwrt/bin/targets/qualcommax/ipq807x/*
-
