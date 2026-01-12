@@ -88,7 +88,7 @@ jobs:
            }
 
             # NSS 必须存在
-            grep '^CONFIG_PACKAGE_kmod-qca-nss-drv=y' .config || {
+            grep -E "CONFIG_PACKAGE_kmod-qca-nss-drv(=y|=m)" .config || {
               echo "❌ NSS driver missing"
               exit 1
             }
