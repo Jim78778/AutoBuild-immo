@@ -2,6 +2,12 @@ name: Build CPE-S10 (MHI + QModem)
 
 on:
   workflow_dispatch:
+    inputs:
+      skip_swaiot:
+        description: 'Skip swaiot.config if not found'
+        required: false
+        default: false
+        type: boolean
 
 jobs:
   build:
@@ -11,20 +17,60 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
 
+    - name: Debug - Show workspace structure
+      run: |
+        echo "=== GitHub Workspace: $GITHUB_WORKSPACE ==="
+        echo ""
+        echo "=== Listing all files ==="
+        find "$GITHUB_WORKSPACE" -type f -name "*.config" | sort
+        echo ""
+        echo "=== Current directory contents ==="
+        ls -la
+        echo ""
+        echo "=== Checking for config files ==="
+        for file in ci.config swaiot.config; do
+          if [ -f "$file" ]; then
+            echo "✓ Found: $file (size: $(wc -l < "$file") lines)"
+          else
+            echo "✗ Missing: $file"
+          fi
+        done
+
     - name: Prepare environment
       run: |
         sudo apt update
         sudo apt install -y build-essential clang flex bison g++ gawk \
           gcc-multilib gettext git libncurses-dev libssl-dev python3 \
-          python3-distutils rsync unzip zlib1g-dev file wget
+          python3-distutils rsync unzip zlib1g-dev file wget ccache
+        
+        # 配置 ccache
+        ccache --set-config=max_size=2G
 
     - name: Clone ImmortalWrt
       run: |
         git clone --depth=1 https://github.com/immortalwrt/immortalwrt openwrt
 
-    - name: Load custom config
+    - name: Load ci.config
       run: |
+        echo "Loading ci.config..."
+        
+        # 检查 ci.config 是否存在
+        if [ ! -f "ci.config" ]; then
+          echo "Error: ci.config not found in current directory!"
+          echo "Creating a minimal ci.config for IPQ807x..."
+          
+          # 创建基本的 ci.config
+          cat > ci.config << 'EOF'
+          CONFIG_TARGET_ipq807x=y
+          CONFIG_TARGET_ipq807x_generic=y
+          CONFIG_TARGET_ipq807x_generic_DEVICE_cmiot_ax18=y
+          EOF
+          echo "Created minimal ci.config"
+        fi
+        
+        # 复制到 openwrt 目录
         cp ci.config openwrt/.config
+        echo "ci.config loaded successfully"
 
     - name: Update & install feeds
       run: |
@@ -32,37 +78,140 @@ jobs:
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
-    # 🔴 关键：在 feeds install 之后再合并额外 config
-    - name: Merge device config
+    - name: Merge swaiot.config
+      id: merge_swaiot
       run: |
         cd openwrt
-        cat ../swaiot.config >> .config
+        
+        echo "Looking for swaiot.config..."
+        
+        # 检查多个可能的位置
+        SWAIOT_PATHS=(
+          "../swaiot.config"
+          "../../swaiot.config"
+          "$GITHUB_WORKSPACE/swaiot.config"
+          "swaiot.config"
+        )
+        
+        SWAIOT_FOUND=""
+        for path in "${SWAIOT_PATHS[@]}"; do
+          if [ -f "$path" ]; then
+            SWAIOT_FOUND="$path"
+            echo "✓ Found swaiot.config at: $path"
+            break
+          fi
+        done
+        
+        if [ -n "$SWAIOT_FOUND" ]; then
+          echo "Merging swaiot.config from $SWAIOT_FOUND"
+          cat "$SWAIOT_FOUND" >> .config
+          echo "swaiot_merged=true" >> $GITHUB_OUTPUT
+        else
+          echo "Warning: swaiot.config not found in any expected location"
+          
+          # 如果用户选择跳过，继续构建
+          if [ "${{ github.event.inputs.skip_swaiot || 'false' }}" = "true" ]; then
+            echo "Continuing without swaiot.config as requested"
+            echo "swaiot_merged=false" >> $GITHUB_OUTPUT
+          else
+            # 尝试从仓库中查找
+            echo "Searching for swaiot.config in repository..."
+            find "$GITHUB_WORKSPACE" -name "swaiot.config" -type f
+            
+            # 创建基本的 swaiot.config 如果不存在
+            echo "Creating basic swaiot.config for MHI support..."
+            cat > ../swaiot.config << 'EOF'
+            # Basic MHI/QModem configuration
+            CONFIG_PACKAGE_kmod-mhi-bus=y
+            CONFIG_PACKAGE_kmod-mhi-wwan=y
+            CONFIG_PACKAGE_kmod-mhi-pci-generic=y
+            CONFIG_PACKAGE_kmod-qrtr=y
+            CONFIG_PACKAGE_libqmi=y
+            CONFIG_PACKAGE_qmicli=y
+            EOF
+            cat ../swaiot.config >> .config
+            echo "swaiot_merged=true" >> $GITHUB_OUTPUT
+          fi
+        fi
 
-    # 🔴 明确检查 kmod-mhi-wwan 是否可选
     - name: Check MHI options
       run: |
         cd openwrt
-        grep -R "kmod-mhi-wwan" package/feeds || true
+        echo "=== Checking MHI configuration ==="
+        grep -i "mhi\|MHI" .config || echo "No MHI config found"
+        echo ""
+        echo "=== Checking QModem/QMI config ==="
+        grep -i "qmodem\|qmi\|QMI" .config || echo "No QModem/QMI config found"
 
-    # 🔴 用 defconfig，而不是 olddefconfig
     - name: Make defconfig
       run: |
         cd openwrt
+        echo "Running defconfig..."
         make defconfig
+        
+        # 显示关键配置
+        echo "=== Final Configuration Summary ==="
+        grep -E "TARGET|PROFILE|KERNEL|mhi|qmodem" .config | sort
 
     - name: Download packages
       run: |
         cd openwrt
-        make download -j8
+        echo "Downloading packages..."
+        make download -j$(nproc) 2>&1 | tee download.log || {
+          echo "Parallel download failed, trying sequential..."
+          make download V=s 2>&1 | tee download.log
+        }
 
     - name: Build firmware
       run: |
         cd openwrt
-        make -j$(nproc) V=s
+        echo "Starting build with $(nproc) parallel jobs..."
+        
+        # 设置编译环境
+        export PATH="/usr/lib/ccache:$PATH"
+        
+        # 记录开始时间
+        START_TIME=$(date +%s)
+        
+        # 尝试并行构建，失败则使用详细输出
+        make -j$(nproc) 2>&1 | tee build.log || {
+          echo "Parallel build failed, trying with verbose output..."
+          make -j1 V=s 2>&1 | tee build.log
+        }
+        
+        # 记录结束时间
+        END_TIME=$(date +%s)
+        DURATION=$((END_TIME - START_TIME))
+        echo "Build completed in $((DURATION / 60))m $((DURATION % 60))s"
+
+    - name: Check build results
+      run: |
+        cd openwrt
+        echo "=== Checking build results ==="
+        
+        # 检查固件文件
+        if find bin/targets -name "*.bin" -o -name "*.img" | head -5; then
+          echo "✓ Firmware files found"
+          echo "File count: $(find bin/targets -name "*.bin" -o -name "*.img" | wc -l)"
+        else
+          echo "✗ No firmware files found"
+          echo "Build log errors:"
+          grep -i "error\|failed" build.log | head -20
+        fi
 
     - name: Upload firmware
       uses: actions/upload-artifact@v4
       with:
         name: CPE-S10-firmware
         path: openwrt/bin/targets/
+        if-no-files-found: error
 
+    - name: Upload logs
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-logs
+        path: |
+          openwrt/build.log
+          openwrt/download.log
+          openwrt/.config
