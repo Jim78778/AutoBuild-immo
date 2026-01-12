@@ -61,11 +61,8 @@ jobs:
         sed -i 's/^CONFIG_PACKAGE_kmod-qca-nss-clients.*/# &/' .config
         sed -i 's/^CONFIG_ECM_.*/# &/' .config
 
-        # ⭐ 关键三连（顺序不能错）
         make defconfig
-        make olddefconfig
-        make oldconfig </dev/null
-
+      
     - name: Download
       run: |
         cd openwrt
