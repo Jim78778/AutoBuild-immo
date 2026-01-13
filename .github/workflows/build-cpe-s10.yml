@@ -91,7 +91,3 @@ jobs:
         path: openwrt/bin/targets/qualcommax/ipq807x/
         retention-days: 7
 
-        path: openwrt/bin/targets/
-        retention-days: 7
-
-
