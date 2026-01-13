@@ -1,150 +1,157 @@
-name: Build Swaiot CPE-S10 ImmortalWrt (Stable v2.8.0)
+name: BuildOpenWrt
 
 on:
+  repository_dispatch:
   workflow_dispatch:
-  push:
-    branches:
-      - Jim78778-patch-1
+    inputs:
+      ssh:
+        description: 'SSH connection to Actions'
+        required: false
+        default: 'false'
+      cache:
+        description: 'Cache OpenWrt build'
+        required: false
+        default: 'true'
+  schedule:
+    - cron: '0 8 * * 1'  # 每周一早上8点触发编译
 
 env:
+  REPO_URL: https://github.com/Jim78778/immortalwrt-ipq.git
+  REPO_BRANCH: Jim78778-patch-1
+  FEEDS_CONF: feeds.conf.default
+  CONFIG_FILE: ci.config
+  DIY_P1_SH: diy-part1.sh
+  DIY_P2_SH: diy-part2.sh
+  UPLOAD_BIN_DIR: false
+  UPLOAD_FIRMWARE: true
   TZ: Asia/Shanghai
-  MAKE_JOBS: 8
 
 jobs:
   build:
     runs-on: ubuntu-22.04
 
     steps:
-    # ===============================
-    # 1. Checkout CI repo
-    # ===============================
+    - name: 创建编译空间
+      run: |
+        sudo mkdir -p /workdir
+        sudo chown $USER:$GROUPS /workdir
+
+    - name: 最大化编译空间
+      uses: easimon/maximize-build-space@master
+      with:
+        root-reserve-mb: 2048
+        swap-size-mb: 1024
+        build-mount-path: /workdir
+        overprovision-lvm: 'true'
+        remove-dotnet: 'true'
+        remove-android: 'true'
+        remove-haskell: 'true'
+        remove-codeql: 'true'
+        remove-docker-images: 'true'
+
     - name: Checkout repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v3
 
-    # ===============================
-    # 2. Setup build environment
-    # ===============================
-    - name: Setup build environment
+    - name: 初始化编译环境
+      env:
+        DEBIAN_FRONTEND: noninteractive
       run: |
-        sudo apt update
-        sudo apt install -y \
-          build-essential gcc g++ gawk flex bison \
-          gettext libncurses-dev libssl-dev zlib1g-dev \
-          file wget curl unzip git rsync python3 python3-distutils \
-          ca-certificates ccache
-
+        sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc
+        sudo apt-get -qq update
+        sudo apt-get -qq install -y \
+            $(curl -fsSL https://github.com/Jason6111/OpenWrt_Personal/raw/main/depends-ubuntu-2004) \
+            gcc g++ python3 python3-pip
+        sudo apt-get -qq autoremove --purge
+        sudo apt-get -qq clean
         sudo timedatectl set-timezone "$TZ"
+        sudo mkdir -p /workdir
+        sudo chown $USER:$GROUPS /workdir
 
-    # ===============================
-    # 3. Clone ImmortalWrt
-    # ===============================
-    - name: Clone ImmortalWrt
+    - name: Clone OpenWrt source
+      working-directory: /workdir
       run: |
-        git clone --depth=1 \
-          https://github.com/immortalwrt/immortalwrt.git \
-          openwrt
-        cd openwrt
-        echo "IMMORTALWRT HEAD:"
-        git log -1 --oneline
+        git clone $REPO_URL -b $REPO_BRANCH openwrt
+        ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
 
-    # ===============================
-    # 4. Add QModem feed v2.8.0
-    # ===============================
-    - name: Add QModem feed
-      run: |
-        cd openwrt
-        echo "src-git qmodem https://github.com/FUjr/QModem.git;v2.8.0" >> feeds.conf.default
-        tail -n 3 feeds.conf.default
+    - name: Cache build
+      if: github.event.inputs.cache == 'true'
+      uses: klever1988/cachewrtbuild@main
+      with:
+        ccache: 'true'
+        prefix: ${{ github.workspace }}/openwrt
 
-    # ===============================
-    # 5. Update & install feeds
-    # ===============================
-    - name: Update and install feeds
+    - name: Load diy-part1 (feeds / patches)
+      working-directory: /workdir/openwrt
       run: |
-        cd openwrt
+        echo 'src-git qmodem https://github.com/FUjr/QModem.git;main' >> feeds.conf.default
+        chmod +x $GITHUB_WORKSPACE/$DIY_P1_SH
+        $GITHUB_WORKSPACE/$DIY_P1_SH
+
+    - name: Update & install feeds
+      working-directory: /workdir/openwrt
+      run: |
         ./scripts/feeds update -a
-        ./scripts/feeds install -a
+        ./scripts/feeds install -a -f
 
-    # ===============================
-    # 6. Patch luci-app-qmodem dependencies (v2.8.0 only)
-    # ===============================
-    - name: Patch luci-app-qmodem
+    - name: Load ci.config and diy-part2
+      working-directory: /workdir/openwrt
       run: |
-        cd openwrt
-        sed -i 's/quectel-CM-5G//g' package/feeds/qmodem/luci-app-qmodem/Makefile
-        echo "=== Patched luci-app-qmodem deps ==="
-        grep DEPENDS package/feeds/qmodem/luci-app-qmodem/Makefile || true
+        [ -e $GITHUB_WORKSPACE/files ] && mv $GITHUB_WORKSPACE/files ./files
+        [ -e $GITHUB_WORKSPACE/$CONFIG_FILE ] && cp $GITHUB_WORKSPACE/$CONFIG_FILE ./.config
+        chmod +x $GITHUB_WORKSPACE/$DIY_P2_SH
+        $GITHUB_WORKSPACE/$DIY_P2_SH
 
-    # ===============================
-    # 7. Load ci.config
-    # ===============================
-    - name: Load CI configuration
+    - name: Detect runner performance
+      id: detect
       run: |
-        cd openwrt
-        cp ../ci.config .config
+        CPU_COUNT=$(nproc)
+        MEM_TOTAL=$(grep MemTotal /proc/meminfo | awk '{print $2}')
+        echo "CPU_COUNT=$CPU_COUNT" >> $GITHUB_ENV
+        echo "MEM_TOTAL=$MEM_TOTAL" >> $GITHUB_ENV
 
-    # ===============================
-    # 8. Force target CPE-S10
-    # ===============================
-    - name: Force target (CPE-S10)
-      run: |
-        cd openwrt
-        sed -i '/^CONFIG_TARGET_/d' .config
-        sed -i '/^[[:space:]]\+CONFIG_/d' .config
-        printf '%s\n' \
-          'CONFIG_TARGET_qualcommax=y' \
-          'CONFIG_TARGET_qualcommax_ipq807x=y' \
-          'CONFIG_TARGET_qualcommax_ipq807x_DEVICE_swaiot_cpe_s10=y' \
-          >> .config
-        echo "=== Target config ==="
-        grep CONFIG_TARGET_ .config
+        if [ $MEM_TOTAL -lt 8000000 ]; then
+          echo "Memory <8GB, creating 2GB swap..."
+          sudo fallocate -l 2G /swapfile
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+        fi
 
-    # ===============================
-    # 9. Make defconfig
-    # ===============================
-    - name: Make defconfig
-      run: |
-        cd openwrt
-        make defconfig
-        echo "=== Final target ==="
-        grep CONFIG_TARGET_ .config
+        if [ $CPU_COUNT -ge 8 ] && [ $MEM_TOTAL -ge 16000000 ]; then
+          MAKE_JOBS=$CPU_COUNT
+        elif [ $CPU_COUNT -ge 4 ] && [ $MEM_TOTAL -ge 8000000 ]; then
+          MAKE_JOBS=$((CPU_COUNT / 2))
+        else
+          MAKE_JOBS=1
+        fi
+        echo "MAKE_JOBS=$MAKE_JOBS" >> $GITHUB_ENV
 
-    # ===============================
-    # 10. Download sources
-    # ===============================
     - name: Download packages
+      working-directory: /workdir/openwrt
+      run: make defconfig && make download -j8
+
+    - name: Compile firmware
+      id: compile
+      working-directory: /workdir/openwrt
       run: |
-        cd openwrt
-        make download -j$MAKE_JOBS
+        echo "Compiling with $MAKE_JOBS threads"
+        if [ $MAKE_JOBS -le 2 ]; then
+          make -j$MAKE_JOBS V=s || make -j1 V=s
+        else
+          make -j$MAKE_JOBS || make -j1 V=s
+        fi
+        grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
+        [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
+        echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
 
-    # ===============================
-    # 11. Build firmware
-    # ===============================
-    - name: Build firmware
+    - name: Organize firmware
+      working-directory: /workdir/openwrt/bin/targets/*/*
       run: |
-        cd openwrt
-        make -j$MAKE_JOBS V=sc
+        rm -rf packages
+        echo "FIRMWARE=$PWD" >> $GITHUB_ENV
 
-    # ===============================
-    # 12. Upload artifacts
-    # ===============================
-    - name: Upload firmware
-      uses: actions/upload-artifact@v4
+    - name: Upload firmware artifact
+      uses: actions/upload-artifact@main
       with:
-        name: CPE-S10-firmware
-        path: openwrt/bin/targets/
-        retention-days: 30
-
-    - name: Upload config
-      uses: actions/upload-artifact@v4
-      with:
-        name: build-config
-        path: openwrt/.config
-
-    - name: Upload logs
-      uses: actions/upload-artifact@v4
-      with:
-        name: build-logs
-        path: openwrt/build-*.log
-        retention-days: 7
-
+        name: OpenWrt_firmware${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
+        path: ${{ env.FIRMWARE }}
