@@ -75,7 +75,10 @@ jobs:
         sed -i \
           -e 's/kmod-mhi-wwan/kmod-mhi-wwan-mbim kmod-mhi-wwan-ctrl/g' \
           -e 's/quectel-CM-5G//g' \
-          package/feeds/qmodem/qmodem/Makefile
+          feeds/qmodem/qmodem/Makefile
+         sed -i \
+         -e 's/quectel-CM-5G//g' \
+         feeds/qmodem/luci-app-qmodem/Makefile
 
         echo "QModem Makefile deps:"
         grep DEPENDS package/feeds/qmodem/qmodem/Makefile
