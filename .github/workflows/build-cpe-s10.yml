@@ -1,4 +1,4 @@
-name: Build Swaiot CPE-S10 ImmortalWrt (Stable)
+name: Build Swaiot CPE-S10 ImmortalWrt (QModem v2.8.0 Stable)
 
 on:
   workflow_dispatch:
@@ -15,15 +15,15 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-    # ===============================
-    # 1. Checkout CI repo
-    # ===============================
+    # ==================================================
+    # 1. Checkout CI repository
+    # ==================================================
     - name: Checkout CI repository
       uses: actions/checkout@v4
 
-    # ===============================
+    # ==================================================
     # 2. Prepare build environment
-    # ===============================
+    # ==================================================
     - name: Setup build environment
       run: |
         sudo apt update
@@ -35,109 +35,130 @@ jobs:
 
         sudo timedatectl set-timezone "$TZ"
 
-    # ===============================
+    # ==================================================
     # 3. Clone ImmortalWrt
-    # ===============================
+    # ==================================================
     - name: Clone ImmortalWrt source
       run: |
         git clone --depth=1 \
-          https://github.com/immortalwrt/immortalwrt.git \
-          openwrt
+          https://github.com/immortalwrt/immortalwrt.git openwrt
         cd openwrt
-        echo "IMMORTALWRT HEAD:"
         git log -1 --oneline
 
-    # ===============================
-    # 4. Add QModem feed (固定 v2.8.0)
-    # ===============================
+    # ==================================================
+    # 4. Add QModem feed (LOCK v2.8.0)
+    # ==================================================
     - name: Add QModem feed
       run: |
         cd openwrt
         echo "src-git qmodem https://github.com/FUjr/QModem.git;v2.8.0" >> feeds.conf.default
         tail -n 3 feeds.conf.default
 
-    # ===============================
+    # ==================================================
     # 5. Update & install feeds
-    # ===============================
+    # ==================================================
     - name: Update & install feeds
       run: |
         cd openwrt
         ./scripts/feeds update -a
         ./scripts/feeds install -a
+        ./scripts/feeds install -p qmodem -a
 
-    # ===============================
-    # 6. Patch QModem dependencies (关键)
-    # ===============================
-    - name: Patch QModem Makefile
+    # ==================================================
+    # 6. Patch QModem (AFTER install, ONLY package/feeds)
+    # ==================================================
+    - name: Patch QModem dependencies
       run: |
         cd openwrt
-        # 主 QModem 包
+
+        # --- 强校验 ---
+        if [ ! -f package/feeds/qmodem/qmodem/Makefile ]; then
+          echo "ERROR: QModem Makefile not found"
+          exit 1
+        fi
+
+        # 主包
         sed -i \
           -e 's/kmod-mhi-wwan/kmod-mhi-wwan-mbim kmod-mhi-wwan-ctrl/g' \
           -e 's/quectel-CM-5G//g' \
-          feeds/qmodem/qmodem/Makefile
-        # LuCI 前端
+          package/feeds/qmodem/qmodem/Makefile
+
+        # LuCI
         sed -i \
           -e 's/quectel-CM-5G//g' \
-          feeds/qmodem/luci-app-qmodem/Makefile
+          package/feeds/qmodem/luci-app-qmodem/Makefile
 
-    # ===============================
-    # 7. Load CI config
-    # ===============================
+        echo "=== Patched QModem deps ==="
+        grep DEPENDS package/feeds/qmodem/qmodem/Makefile
+
+    # ==================================================
+    # 7. Load ci.config
+    # ==================================================
     - name: Load ci.config
       run: |
         cd openwrt
         cp ../ci.config .config
 
-    # ===============================
-    # 8. Force target to CPE-S10（稳态写法）
-    # ===============================
-    - name: Force target (no generic, safe printf)
+    # ==================================================
+    # 8. Force target: ipq807x + CPE-S10 (NO heredoc)
+    # ==================================================
+    - name: Force target
       run: |
         cd openwrt
-        # 删除所有旧 target
+
+        # 清理所有 target
         sed -i '/^CONFIG_TARGET_/d' .config
-        # 删除非法空格 CONFIG
         sed -i '/^[[:space:]]\+CONFIG_/d' .config
-        # 安全写入 target
+
         printf '%s\n' \
           'CONFIG_TARGET_qualcommax=y' \
           'CONFIG_TARGET_qualcommax_ipq807x=y' \
           'CONFIG_TARGET_qualcommax_ipq807x_DEVICE_swaiot_cpe_s10=y' \
           >> .config
 
-        echo "=== Target config ==="
+        echo "=== Target ==="
         grep CONFIG_TARGET_ .config
 
-    # ===============================
-    # 9. Make defconfig
-    # ===============================
+    # ==================================================
+    # 9. Finalize config
+    # ==================================================
     - name: Make defconfig
       run: |
         cd openwrt
         make defconfig
-        echo "=== Final target ==="
         grep CONFIG_TARGET_ .config
 
-    # ===============================
+    # ==================================================
     # 10. Download sources
-    # ===============================
+    # ==================================================
     - name: Download packages
       run: |
         cd openwrt
         make download -j$MAKE_JOBS
 
-    # ===============================
+    # ==================================================
     # 11. Build firmware
-    # ===============================
+    # ==================================================
     - name: Build firmware
       run: |
         cd openwrt
         make -j$MAKE_JOBS V=sc
 
-    # ===============================
-    # 12. Upload artifacts
-    # ===============================
+    # ==================================================
+    # 12. Verify QModem is in build (NO废包)
+    # ==================================================
+    - name: Verify QModem packages
+      run: |
+        cd openwrt
+        if ! grep -q CONFIG_PACKAGE_qmodem=y .config; then
+          echo "ERROR: qmodem not enabled"
+          exit 1
+        fi
+        echo "QModem enabled ✔"
+
+    # ==================================================
+    # 13. Upload artifacts
+    # ==================================================
     - name: Upload firmware
       uses: actions/upload-artifact@v4
       with:
