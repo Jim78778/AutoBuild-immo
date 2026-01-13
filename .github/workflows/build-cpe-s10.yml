@@ -1,4 +1,4 @@
-name: Build CPE-S10 (ipq807x + MHI + QModem + NSS)
+name: Build CPE-S10 (ImmortalWrt + MHI + QModem)
 
 on:
   workflow_dispatch:
@@ -8,82 +8,45 @@ jobs:
     runs-on: ubuntu-22.04
 
     env:
-      MAKE_JOBS: 16
+      MAKE_JOBS: 8
 
     steps:
-    # ------------------------------------------------------
-    # 0. 显示 Runner 信息（你要求的）
-    # ------------------------------------------------------
-    - name: Show system info
-      run: |
-        echo "CPU: $(nproc)"
-        free -h
-        df -h /
-
-    # ------------------------------------------------------
-    # 1. Checkout 你的仓库（含 ci.config / swaiot.config）
-    # ------------------------------------------------------
-    - name: Checkout repository
+    - name: Checkout
       uses: actions/checkout@v4
 
-    # ------------------------------------------------------
-    # 2. 释放 GitHub Runner 磁盘（关键，防止 No space）
-    # ------------------------------------------------------
+    # 释放磁盘，防止 No space left on device
     - name: Free disk space
       run: |
         sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache
         sudo apt clean
         df -h /
 
-    # ------------------------------------------------------
-    # 3. 安装编译依赖（不装 Rust）
-    # ------------------------------------------------------
     - name: Install build dependencies
       run: |
         sudo apt update
         sudo apt install -y \
-          build-essential clang flex bison g++ gawk \
-          libncurses-dev libssl-dev zlib1g-dev \
-          python3 python3-distutils \
-          git gettext rsync wget curl file unzip time
+          build-essential clang flex bison g++ gawk gcc-multilib \
+          gettext git libncurses-dev libssl-dev python3 python3-distutils \
+          rsync unzip zlib1g-dev file wget curl time
 
-    # ------------------------------------------------------
-    # 4. Clone ImmortalWrt（官方源）
-    # ------------------------------------------------------
-    - name: Clone ImmortalWrt
+    - name: Clone ImmortalWrt (your fork)
       run: |
-        git clone --depth=1 https://github.com/immortalwrt/immortalwrt openwrt
+        git clone --depth=1 -b Jim78778-patch-1 \
+          https://github.com/Jim78778/immortalwrt-ipq.git openwrt
 
-    # ------------------------------------------------------
-    # 5. 注入 CPE-S10 设备（关键：避免 aliyun_ap8220）
-    # ------------------------------------------------------
-    - name: Register CPE-S10 device
+    # ===== 关键修复 1：在 feeds 之前就干掉 NSS mac80211 补丁 =====
+    # backports 6.12 + NSS ath11k = 必炸
+    - name: Remove NSS mac80211 patches (force disable)
       run: |
         cd openwrt
+        rm -rf package/kernel/mac80211/patches/nss
+        echo "✅ NSS mac80211 patches removed"
 
-        cat << 'EOF' >> target/linux/qualcommax/ipq807x/target.mk
-
-        define Device/cpe_s10
-          \$(call Device/FitImage)
-          DEVICE_VENDOR := Swaiot
-          DEVICE_MODEL := CPE-S10
-          DEVICE_DTS := ipq8071-s10
-        endef
-        TARGET_DEVICES += cpe_s10
-
-        EOF
-
-    # ------------------------------------------------------
-    # 6. 添加 QModem feed
-    # ------------------------------------------------------
     - name: Add QModem feed
       run: |
         cd openwrt
         echo "src-git qmodem https://github.com/FUjr/QModem.git" >> feeds.conf.default
 
-    # ------------------------------------------------------
-    # 7. 更新 & 安装 feeds（顺序固定）
-    # ------------------------------------------------------
     - name: Update & install feeds
       run: |
         cd openwrt
@@ -91,79 +54,43 @@ jobs:
         ./scripts/feeds install -a
         ./scripts/feeds install -a -p qmodem
 
-    # ------------------------------------------------------
-    # 8. 加载配置（严格顺序，防止被覆盖）
-    # ------------------------------------------------------
-    
-    - name: Register CPE-S10 device
-      run: |
-       cd openwrt
-
-        cat << 'EOF' >> target/linux/qualcommax/ipq807x/target.mk
-
-        define Device/cpe_s10
-        \$(call Device/FitImage)
-        DEVICE_VENDOR := Swaiot
-        DEVICE_MODEL := CPE-S10
-        DEVICE_DTS := ipq8071-s10
-       endef
-       TARGET_DEVICES += cpe_s10
-
-        EOF
-
-    
-    - name: Apply configuration
+    # ===== 关键修复 2：QModem 依赖修正（你这一步是对的）=====
+    - name: Patch QModem dependencies
       run: |
         cd openwrt
+        sed -i \
+          -e 's/kmod-mhi-wwan/kmod-mhi-wwan-mbim kmod-mhi-wwan-ctrl/g' \
+          -e 's/quectel-CM-5G//g' \
+          package/feeds/qmodem/qmodem/Makefile
 
-        # 基础配置
+    - name: Load config
+      run: |
+        cd openwrt
         cp ../ci.config .config
 
-        # 设备 / MHI / QModem / NSS 配置
-        cat ../swaiot.config >> .config
-
-        # 禁 Rust（硬保险）
-        sed -i '/CONFIG_RUST/d' .config
-        sed -i '/CONFIG_CARGO/d' .config
-        echo "# CONFIG_RUST is not set" >> .config
-        echo "# CONFIG_PACKAGE_rust is not set" >> .config
-        echo "# CONFIG_PACKAGE_cargo is not set" >> .config
-
+    - name: Make defconfig
+      run: |
+        cd openwrt
         make defconfig
 
-    # ------------------------------------------------------
-    # 9. 校验（防止再翻车）
-    # ------------------------------------------------------
-    - name: Verify target & packages
+    - name: Download packages
       run: |
         cd openwrt
-        grep -E "cpe_s10|ipq8071-s10" .config || true
-        grep -E "qmodem|kmod-mhi" .config || true
-
-    # ------------------------------------------------------
-    # 10. 下载源码（控磁盘）
-    # ------------------------------------------------------
-    - name: Download sources
-      run: |
-        cd openwrt
-        make download -j8
+        make download -j$MAKE_JOBS
         find dl -size +50M -delete
 
-    # ------------------------------------------------------
-    # 11. 编译
-    # ------------------------------------------------------
     - name: Build firmware
       run: |
         cd openwrt
-        time make -j$(nproc) || make -j1 V=s
+        make -j$MAKE_JOBS || make -j1 V=s
 
-    # ------------------------------------------------------
-    # 12. 上传产物
-    # ------------------------------------------------------
     - name: Upload firmware
       uses: actions/upload-artifact@v4
       with:
-        name: CPE-S10-ipq807x
+        name: CPE-S10-firmware
+        path: openwrt/bin/targets/qualcommax/ipq807x/
+        retention-days: 7
+
         path: openwrt/bin/targets/
         retention-days: 7
 
