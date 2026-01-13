@@ -80,10 +80,10 @@ jobs:
 
         # 明确写死 ipq807x + CPE-S10
         cat >> .config << 'EOF'
-CONFIG_TARGET_qualcommax=y
-CONFIG_TARGET_qualcommax_ipq807x=y
-CONFIG_TARGET_qualcommax_ipq807x_DEVICE_swaiot_cpe_s10=y
-EOF
+           CONFIG_TARGET_qualcommax=y
+           CONFIG_TARGET_qualcommax_ipq807x=y
+           CONFIG_TARGET_qualcommax_ipq807x_DEVICE_swaiot_cpe_s10=y
+           EOF
 
         make defconfig
 
