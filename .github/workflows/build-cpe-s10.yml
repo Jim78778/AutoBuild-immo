@@ -52,7 +52,7 @@ jobs:
         cd openwrt
         ./scripts/feeds update -a
         ./scripts/feeds install -a
-        ./scripts/feeds install -a -p qmodem
+        ./scripts/feeds install -a -f -p qmodem
 
     # ===== 关键修复 2：QModem 依赖修正（你这一步是对的）=====
     - name: Patch QModem dependencies
