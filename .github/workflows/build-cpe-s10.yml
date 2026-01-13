@@ -1,47 +1,48 @@
-name: Build CPE-S10 (ImmortalWrt + MHI + QModem)
+name: Build Swaiot CPE-S10 ImmortalWrt
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
+
+env:
+  REPO_URL: https://github.com/Jim78778/immortalwrt-ipq.git
+  REPO_BRANCH: Jim78778-patch-1
+  TZ: Asia/Shanghai
+  MAKE_JOBS: 8
 
 jobs:
   build:
     runs-on: ubuntu-22.04
 
-    env:
-      MAKE_JOBS: 8
-
     steps:
-    - name: Checkout
+    - name: Checkout CI repo
       uses: actions/checkout@v4
 
-    # 释放磁盘，防止 No space left on device
+    - name: Set timezone
+      run: |
+        sudo timedatectl set-timezone "$TZ"
+
     - name: Free disk space
       run: |
-        sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache
-        sudo apt clean
-        df -h /
+        sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
+        df -h
 
     - name: Install build dependencies
       run: |
-        sudo apt update
-        sudo apt install -y \
+        sudo apt-get update
+        sudo apt-get install -y \
           build-essential clang flex bison g++ gawk gcc-multilib \
           gettext git libncurses-dev libssl-dev python3 python3-distutils \
-          rsync unzip zlib1g-dev file wget curl time
+          rsync unzip zlib1g-dev file wget
 
-    - name: Clone ImmortalWrt (your fork)
+    # ========= 获取 ImmortalWrt =========
+    - name: Clone ImmortalWrt
       run: |
-        git clone --depth=1 -b Jim78778-patch-1 \
-          https://github.com/Jim78778/immortalwrt-ipq.git openwrt
+        git clone --depth=1 -b "$REPO_BRANCH" "$REPO_URL" openwrt
 
-    # ===== 关键修复 1：在 feeds 之前就干掉 NSS mac80211 补丁 =====
-    # backports 6.12 + NSS ath11k = 必炸
-    - name: Remove NSS mac80211 patches (force disable)
-      run: |
-        cd openwrt
-        rm -rf package/kernel/mac80211/patches/nss
-        echo "✅ NSS mac80211 patches removed"
-
+    # ========= 添加 QModem feed =========
     - name: Add QModem feed
       run: |
         cd openwrt
@@ -54,7 +55,7 @@ jobs:
         ./scripts/feeds install -a
         ./scripts/feeds install -a -f -p qmodem
 
-    # ===== 关键修复 2：QModem 依赖修正（你这一步是对的）=====
+    # ========= 修正 QModem 依赖（关键） =========
     - name: Patch QModem dependencies
       run: |
         cd openwrt
@@ -63,49 +64,39 @@ jobs:
           -e 's/quectel-CM-5G//g' \
           package/feeds/qmodem/qmodem/Makefile
 
-    - name: Load config
+    # ========= 载入 config（只做一次） =========
+    - name: Load base config
       run: |
         cd openwrt
         cp ../ci.config .config
-        make defconfig
-        
-    - name: Force Swaiot CPE-S10 target
-      run: |
-        cd ../immortalwrt
 
-         # 清理所有旧 target
-         sed -i '/CONFIG_TARGET_/d' .config
-
-        #强制 target / subtarget / device
-         cat >> .config << 'EOF'
-         CONFIG_TARGET_qualcommax=y
-         CONFIG_TARGET_qualcommax_ipq807x=y
-         CONFIG_TARGET_qualcommax_ipq807x_DEVICE_swaiot_cpe_s10=y
-         EOF
-
-         make defconfig
-
-    
-    - name: Make defconfig
+    # ========= 强制 target / device（唯一位置） =========
+    - name: Force target to Swaiot CPE-S10
       run: |
         cd openwrt
+
+        # 清理所有旧 target（防止 generic）
+        sed -i '/^CONFIG_TARGET_/d' .config
+
+        # 明确写死 ipq807x + CPE-S10
+        cat >> .config << 'EOF'
+CONFIG_TARGET_qualcommax=y
+CONFIG_TARGET_qualcommax_ipq807x=y
+CONFIG_TARGET_qualcommax_ipq807x_DEVICE_swaiot_cpe_s10=y
+EOF
+
         make defconfig
 
-    - name: Download packages
-      run: |
-        cd openwrt
-        make download -j$MAKE_JOBS
-        find dl -size +50M -delete
-
+    # ========= 构建 =========
     - name: Build firmware
       run: |
         cd openwrt
-        make -j$MAKE_JOBS || make -j1 V=s
+        make -j$(nproc) V=s
 
+    # ========= 上传固件 =========
     - name: Upload firmware
       uses: actions/upload-artifact@v4
       with:
         name: CPE-S10-firmware
         path: openwrt/bin/targets/qualcommax/ipq807x/
-        retention-days: 7
 
