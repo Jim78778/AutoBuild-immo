@@ -1,4 +1,4 @@
-name: Build Swaiot CPE-S10 ImmortalWrt (QModem v2.8.0 Stable)
+name: Build Swaiot CPE-S10 ImmortalWrt (Stable v2.8.0)
 
 on:
   workflow_dispatch:
@@ -22,7 +22,7 @@ jobs:
       uses: actions/checkout@v4
 
     # ===============================
-    # 2. Prepare build environment
+    # 2. Setup build environment
     # ===============================
     - name: Setup build environment
       run: |
@@ -36,7 +36,7 @@ jobs:
         sudo timedatectl set-timezone "$TZ"
 
     # ===============================
-    # 3. Clone ImmortalWrt source
+    # 3. Clone ImmortalWrt
     # ===============================
     - name: Clone ImmortalWrt
       run: |
@@ -48,7 +48,7 @@ jobs:
         git log -1 --oneline
 
     # ===============================
-    # 4. Add QModem feed (固定 v2.8.0)
+    # 4. Add QModem feed v2.8.0
     # ===============================
     - name: Add QModem feed
       run: |
@@ -59,40 +59,34 @@ jobs:
     # ===============================
     # 5. Update & install feeds
     # ===============================
-    - name: Update & install feeds
+    - name: Update and install feeds
       run: |
         cd openwrt
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
     # ===============================
-    # 6. Patch QModem (v2.8.0)
+    # 6. Patch luci-app-qmodem dependencies (v2.8.0 only)
     # ===============================
-    - name: Patch QModem luci-app
+    - name: Patch luci-app-qmodem
       run: |
         cd openwrt
-
-        if [ ! -f package/feeds/qmodem/luci-app-qmodem/Makefile ]; then
-          echo "ERROR: luci-app-qmodem Makefile not found"
-          exit 1
-        fi
-
         sed -i 's/quectel-CM-5G//g' package/feeds/qmodem/luci-app-qmodem/Makefile
-        echo "=== Patched luci-app-qmodem DEPENDS ==="
+        echo "=== Patched luci-app-qmodem deps ==="
         grep DEPENDS package/feeds/qmodem/luci-app-qmodem/Makefile || true
 
     # ===============================
-    # 7. Load CI config
+    # 7. Load ci.config
     # ===============================
-    - name: Load ci.config
+    - name: Load CI configuration
       run: |
         cd openwrt
         cp ../ci.config .config
 
     # ===============================
-    # 8. Force target to CPE-S10
+    # 8. Force target CPE-S10
     # ===============================
-    - name: Force CPE-S10 target
+    - name: Force target (CPE-S10)
       run: |
         cd openwrt
         sed -i '/^CONFIG_TARGET_/d' .config
@@ -102,7 +96,6 @@ jobs:
           'CONFIG_TARGET_qualcommax_ipq807x=y' \
           'CONFIG_TARGET_qualcommax_ipq807x_DEVICE_swaiot_cpe_s10=y' \
           >> .config
-
         echo "=== Target config ==="
         grep CONFIG_TARGET_ .config
 
@@ -133,7 +126,7 @@ jobs:
         make -j$MAKE_JOBS V=sc
 
     # ===============================
-    # 12. Upload firmware
+    # 12. Upload artifacts
     # ===============================
     - name: Upload firmware
       uses: actions/upload-artifact@v4
@@ -142,14 +135,13 @@ jobs:
         path: openwrt/bin/targets/
         retention-days: 30
 
-    - name: Upload build config
+    - name: Upload config
       uses: actions/upload-artifact@v4
       with:
         name: build-config
         path: openwrt/.config
 
-    - name: Upload build logs
-      if: always()
+    - name: Upload logs
       uses: actions/upload-artifact@v4
       with:
         name: build-logs
