@@ -17,7 +17,9 @@ git clone https://github.com/kenzok8/golang feeds/packages/lang/golang
 #sed -i 's/^#\(.*helloworld\)/\1/' feeds.conf.default
 
 # Add a feed source
-echo 'src-git helloworld https://github.com/fw876/helloworld' >>feeds.conf.default
+echo 'src-git qmodem https://github.com/FUjr/QModem.git;main' >> feeds.conf.default
+./scripts/feeds update qmodem
+./scripts/feeds install -a -p qmodem
 #echo 'src-git passwall https://github.com/xiaorouji/openwrt-passwall' >>feeds.conf.default
 # 跳过 mx4200 DTS，避免 patch 失败
 sed -i '/ipq8174-mx4200.dtsi/d' \
