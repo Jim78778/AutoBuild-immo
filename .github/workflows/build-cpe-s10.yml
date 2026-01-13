@@ -1,125 +1,44 @@
-name: Build CPE-S10 (MHI + QModem) - GitHub Runner
+name: Build CPE-S10 (ImmortalWrt + MHI + QModem)
 
 on:
   workflow_dispatch:
-    inputs:
-      target:
-        description: 'Build target'
-        required: false
-        default: 'full'
-        type: choice
-        options: [full, kernel, packages]
-      use_ccache:
-        description: 'Enable CCache'
-        required: false
-        default: true
-        type: boolean
 
 jobs:
   build:
     runs-on: ubuntu-22.04
 
     env:
-      CCACHE_DIR: /tmp/ccache
-      CCACHE_MAXSIZE: 8G
-      MAKE_JOBS: 16
-      BUILD_TYPE: ${{ github.event.inputs.target || 'full' }}
-      USE_CCACHE: ${{ github.event.inputs.use_ccache }}
+      MAKE_JOBS: 8
 
     steps:
-    - name: Check runner resources
-      run: |
-        echo "CPU: $(nproc)"
-        free -h
-        df -h /
-
-    - name: Checkout repository
+    - name: Checkout
       uses: actions/checkout@v4
 
-    # ✅ 必须：释放磁盘空间
+    # 释放磁盘，防止 No space left on device
     - name: Free disk space
       run: |
         sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache
         sudo apt clean
         df -h /
 
-    - name: Setup build environment
+    - name: Install build dependencies
       run: |
         sudo apt update
         sudo apt install -y \
-          build-essential ccache clang flex bison g++ gawk \
-          libncurses-dev libssl-dev zlib1g-dev \
-          python3 python3-distutils \
-          git gettext rsync wget curl file unzip time
+          build-essential clang flex bison g++ gawk gcc-multilib \
+          gettext git libncurses-dev libssl-dev python3 python3-distutils \
+          rsync unzip zlib1g-dev file wget curl time
 
-        if [ "${USE_CCACHE}" = "true" ]; then
-          echo "CC=ccache gcc" >> $GITHUB_ENV
-          echo "CXX=ccache g++" >> $GITHUB_ENV
-          ccache --set-config=max_size=8G
-          ccache -z
-        fi
-
-    - name: Clone ImmortalWrt
+    - name: Clone ImmortalWrt (your fork)
       run: |
-        git clone --depth=1 https://github.com/immortalwrt/immortalwrt openwrt
+        git clone --depth=1 -b Jim78778-patch-1 \
+          https://github.com/Jim78778/immortalwrt-ipq.git openwrt
 
-    # ✅ 关键：加入 QModem feed
     - name: Add QModem feed
       run: |
         cd openwrt
         echo "src-git qmodem https://github.com/FUjr/QModem.git" >> feeds.conf.default
 
-    - name: Add missing dependencies
-      run: |
-       cd openwrt
-    
-       echo "=== Adding missing dependencies ==="
-    
-       # 1. 添加 missing Python packages
-       echo "Adding missing Python packages..."
-    
-       # 检查这些包是否在 feeds 中
-       if ./scripts/feeds list | grep -q "python3-pysocks"; then
-       echo "python3-pysocks is available"
-       else
-       echo "python3-pysocks not in feeds, will be built from source"
-       # 如果需要，可以手动添加
-       fi
-    
-       if ./scripts/feeds list | grep -q "python3-unidecode"; then
-       echo "python3-unidecode is available"
-       else
-       echo "python3-unidecode not in feeds, will be built from source"
-       fi
-    
-        # 2. 确保 MHI 驱动被启用
-        echo "Ensuring MHI drivers are enabled..."
-    
-        # 创建或修改配置
-        if [ -f ".config" ]; then
-       # 添加 MHI 相关配置
-        echo "CONFIG_PACKAGE_kmod-mhi-bus=y" >> .config
-        echo "CONFIG_PACKAGE_kmod-mhi-wwan=y" >> .config
-        echo "CONFIG_PACKAGE_kmod-mhi-pci-generic=y" >> .config
-        echo "CONFIG_PACKAGE_kmod-mhi-netdev=y" >> .config
-        echo "CONFIG_PACKAGE_kmod-qrtr=y" >> .config
-        echo "CONFIG_PACKAGE_kmod-qrtr-mhi=y" >> .config
-      
-        # 添加 Python 包
-        echo "CONFIG_PACKAGE_python3-pysocks=y" >> .config
-        echo "CONFIG_PACKAGE_python3-unidecode=y" >> .config
-      
-        # 如果有 quectel-CM-5G 包
-        if ./scripts/feeds list | grep -q "quectel-CM-5G"; then
-        echo "CONFIG_PACKAGE_quectel-CM-5G=y" >> .config
-        else
-        echo "Note: quectel-CM-5G package not found in feeds"
-        fi
-       fi
-    
-        # 3. 重新运行 defconfig
-        make defconfig
-    
     - name: Update & install feeds
       run: |
         cd openwrt
@@ -127,35 +46,39 @@ jobs:
         ./scripts/feeds install -a
         ./scripts/feeds install -a -p qmodem
 
-    # ✅ 安全加载 config（顺序固定）
-    - name: Apply configuration
+    # 🔥 关键修复：让 QModem 适配 ImmortalWrt
+    - name: Patch QModem dependencies
+      run: |
+        cd openwrt
+        sed -i \
+          -e 's/kmod-mhi-wwan/kmod-mhi-wwan-mbim kmod-mhi-wwan-ctrl/g' \
+          -e 's/quectel-CM-5G//g' \
+          package/feeds/qmodem/qmodem/Makefile
+
+    - name: Load config
       run: |
         cd openwrt
         cp ../ci.config .config
-        cat ../swaiot.config >> .config
-        make defconfig
 
-    - name: Verify QModem & MHI
+    - name: Make defconfig
       run: |
         cd openwrt
-        grep -R "qmodem" feeds || true
-        grep -R "kmod-mhi" package || true
+        make defconfig
 
     - name: Download packages
       run: |
         cd openwrt
-        make download -j$(nproc)
+        make download -j$MAKE_JOBS
         find dl -size +50M -delete
 
     - name: Build firmware
       run: |
         cd openwrt
-        time make -j$(nproc) || make -j1 V=s
+        make -j$MAKE_JOBS || make -j1 V=s
 
-    - name: Upload artifacts
+    - name: Upload firmware
       uses: actions/upload-artifact@v4
       with:
-        name: firmware-${{ github.sha }}
-        path: openwrt/bin/targets/
+        name: CPE-S10-firmware
+        path: openwrt/bin/targets/qualcommax/ipq807x/
         retention-days: 7
-
