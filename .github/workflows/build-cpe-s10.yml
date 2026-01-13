@@ -53,7 +53,7 @@ jobs:
     - name: Add QModem feed
       run: |
         cd openwrt
-        echo "src-git qmodem https://github.com/FUjr/QModem.git" >> feeds.conf.default
+        echo "src-git qmodem https://github.com/FUjr/QModem.git;v2.8.0" >> feeds.conf.default
         tail -n 3 feeds.conf.default
 
     # ===============================
