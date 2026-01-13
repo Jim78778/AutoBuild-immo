@@ -48,7 +48,7 @@ jobs:
         git log -1 --oneline
 
     # ===============================
-    # 4. Add QModem feed
+    # 4. Add QModem feed (固定 v2.8.0)
     # ===============================
     - name: Add QModem feed
       run: |
@@ -64,7 +64,6 @@ jobs:
         cd openwrt
         ./scripts/feeds update -a
         ./scripts/feeds install -a
-        ./scripts/feeds install -p qmodem -a || true
 
     # ===============================
     # 6. Patch QModem dependencies (关键)
@@ -72,16 +71,15 @@ jobs:
     - name: Patch QModem Makefile
       run: |
         cd openwrt
+        # 主 QModem 包
         sed -i \
           -e 's/kmod-mhi-wwan/kmod-mhi-wwan-mbim kmod-mhi-wwan-ctrl/g' \
           -e 's/quectel-CM-5G//g' \
           feeds/qmodem/qmodem/Makefile
-         sed -i \
-         -e 's/quectel-CM-5G//g' \
-         feeds/qmodem/luci-app-qmodem/Makefile
-
-        echo "QModem Makefile deps:"
-        grep DEPENDS package/feeds/qmodem/qmodem/Makefile
+        # LuCI 前端
+        sed -i \
+          -e 's/quectel-CM-5G//g' \
+          feeds/qmodem/luci-app-qmodem/Makefile
 
     # ===============================
     # 7. Load CI config
@@ -94,16 +92,14 @@ jobs:
     # ===============================
     # 8. Force target to CPE-S10（稳态写法）
     # ===============================
-    - name: Force target (no generic, no here-doc)
+    - name: Force target (no generic, safe printf)
       run: |
         cd openwrt
-
         # 删除所有旧 target
         sed -i '/^CONFIG_TARGET_/d' .config
-        # 删除所有非法（带空格）的 CONFIG 行
+        # 删除非法空格 CONFIG
         sed -i '/^[[:space:]]\+CONFIG_/d' .config
-
-        # 安全写入 target（printf 永不翻车）
+        # 安全写入 target
         printf '%s\n' \
           'CONFIG_TARGET_qualcommax=y' \
           'CONFIG_TARGET_qualcommax_ipq807x=y' \
@@ -114,13 +110,12 @@ jobs:
         grep CONFIG_TARGET_ .config
 
     # ===============================
-    # 9. Finalize config
+    # 9. Make defconfig
     # ===============================
     - name: Make defconfig
       run: |
         cd openwrt
         make defconfig
-
         echo "=== Final target ==="
         grep CONFIG_TARGET_ .config
 
@@ -155,5 +150,3 @@ jobs:
       with:
         name: build-config
         path: openwrt/.config
-
-
