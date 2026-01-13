@@ -1,4 +1,4 @@
-name: Build Swaiot CPE-S10 ImmortalWrt (Stable)
+name: Build Swaiot CPE-S10 ImmortalWrt (Stable v2.8.0)
 
 on:
   workflow_dispatch:
@@ -16,13 +16,13 @@ jobs:
 
     steps:
     # ===============================
-    # 1. Checkout CI repo
+    # 1. Checkout CI repository
     # ===============================
     - name: Checkout CI repository
       uses: actions/checkout@v4
 
     # ===============================
-    # 2. Prepare build environment
+    # 2. Setup build environment
     # ===============================
     - name: Setup build environment
       run: |
@@ -36,11 +36,13 @@ jobs:
         sudo timedatectl set-timezone "$TZ"
 
     # ===============================
-    # 3. Clone ImmortalWrt
+    # 3. Clone ImmortalWrt source
     # ===============================
     - name: Clone ImmortalWrt source
       run: |
-        git clone --depth=1 https://github.com/immortalwrt/immortalwrt.git openwrt
+        git clone --depth=1 \
+          https://github.com/immortalwrt/immortalwrt.git \
+          openwrt
         cd openwrt
         echo "IMMORTALWRT HEAD:"
         git log -1 --oneline
@@ -52,7 +54,7 @@ jobs:
       run: |
         cd openwrt
         echo "src-git qmodem https://github.com/FUjr/QModem.git;v2.8.0" >> feeds.conf.default
-        tail -n 5 feeds.conf.default
+        tail -n 3 feeds.conf.default
 
     # ===============================
     # 5. Update & install feeds
@@ -64,30 +66,29 @@ jobs:
         ./scripts/feeds install -a
 
     # ===============================
-    # 6. Patch QModem（只改真实存在的包）
+    # 6. Patch QModem dependencies (v2.8.0 safe)
     # ===============================
-    - name: Patch QModem luci-app (safe)
+    - name: Patch QModem (v2.8.0)
       run: |
         cd openwrt
 
-        echo "=== QModem feed content ==="
-        ls package/feeds/qmodem
+        echo "=== QModem feed tree ==="
+        find package/feeds/qmodem -maxdepth 2 -type f -name Makefile
 
-        # 只修 luci-app-qmodem（v2.8.0 确实存在）
+        # v2.8.0 只 patch luci-app-qmodem
         if [ ! -f package/feeds/qmodem/luci-app-qmodem/Makefile ]; then
           echo "ERROR: luci-app-qmodem Makefile not found"
           exit 1
         fi
 
-        # 移除不存在的 quectel-CM-5G 依赖
-        sed -i 's/quectel-CM-5G//g' \
-          package/feeds/qmodem/luci-app-qmodem/Makefile
+        # 移除 quectel-CM-5G 依赖
+        sed -i 's/quectel-CM-5G//g' package/feeds/qmodem/luci-app-qmodem/Makefile
 
         echo "=== luci-app-qmodem DEPENDS ==="
-        grep DEPENDS package/feeds/qmodem/luci-app-qmodem/Makefile
+        grep DEPENDS package/feeds/qmodem/luci-app-qmodem/Makefile || true
 
     # ===============================
-    # 7. Load ci.config
+    # 7. Load CI config
     # ===============================
     - name: Load ci.config
       run: |
@@ -95,24 +96,19 @@ jobs:
         cp ../ci.config .config
 
     # ===============================
-    # 8. Force target to CPE-S10（绝不翻车写法）
+    # 8. Force target to CPE-S10
     # ===============================
-    - name: Force target (ipq807x + CPE-S10)
+    - name: Force target (safe printf)
       run: |
         cd openwrt
-
-        # 清理所有旧 target
         sed -i '/^CONFIG_TARGET_/d' .config
         sed -i '/^[[:space:]]\+CONFIG_/d' .config
-
-        # 写死目标
         printf '%s\n' \
           'CONFIG_TARGET_qualcommax=y' \
           'CONFIG_TARGET_qualcommax_ipq807x=y' \
           'CONFIG_TARGET_qualcommax_ipq807x_DEVICE_swaiot_cpe_s10=y' \
           >> .config
-
-        echo "=== Target ==="
+        echo "=== Target config ==="
         grep CONFIG_TARGET_ .config
 
     # ===============================
@@ -122,7 +118,7 @@ jobs:
       run: |
         cd openwrt
         make defconfig
-        echo "=== Final Target ==="
+        echo "=== Final target ==="
         grep CONFIG_TARGET_ .config
 
     # ===============================
