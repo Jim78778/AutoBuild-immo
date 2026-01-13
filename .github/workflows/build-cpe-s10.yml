@@ -67,12 +67,14 @@ jobs:
       run: |
         cd openwrt
         cp ../ci.config .config
-    
+        make defconfig
+        
     - name: Sanitize config (force CPE-S10)
       run: |
         cd openwrt
         sed -i '/CONFIG_TARGET_qualcommax_ipq807x_DEVICE_/d' .config
         echo "CONFIG_TARGET_qualcommax_ipq807x_DEVICE_swaiot_cpe_s10=y" >> .config
+        make defconfig
 
     
     - name: Make defconfig
