@@ -34,6 +34,14 @@ jobs:
         git clone --depth=1 -b Jim78778-patch-1 \
           https://github.com/Jim78778/immortalwrt-ipq.git openwrt
 
+    # ===== 关键修复 1：在 feeds 之前就干掉 NSS mac80211 补丁 =====
+    # backports 6.12 + NSS ath11k = 必炸
+    - name: Remove NSS mac80211 patches (force disable)
+      run: |
+        cd openwrt
+        rm -rf package/kernel/mac80211/patches/nss
+        echo "✅ NSS mac80211 patches removed"
+
     - name: Add QModem feed
       run: |
         cd openwrt
@@ -46,7 +54,7 @@ jobs:
         ./scripts/feeds install -a
         ./scripts/feeds install -a -p qmodem
 
-    # 🔥 关键修复：让 QModem 适配 ImmortalWrt
+    # ===== 关键修复 2：QModem 依赖修正（你这一步是对的）=====
     - name: Patch QModem dependencies
       run: |
         cd openwrt
@@ -82,3 +90,4 @@ jobs:
         name: CPE-S10-firmware
         path: openwrt/bin/targets/qualcommax/ipq807x/
         retention-days: 7
+
