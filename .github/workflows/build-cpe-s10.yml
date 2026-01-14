@@ -82,7 +82,7 @@ jobs:
     - name: Apply ci.config
       run: |
         cd openwrt
-        cp ../ci.config .config
+        cat ../ci.config .config
 
     # 10. Force S10 target
     - name: Force S10 target
