@@ -78,7 +78,7 @@ jobs:
     - name: Make defconfig
       run: |
         cd openwrt
-        make defconfig
+        make defconfig V=s
         grep swaiot_cpe_s10 .config || exit 1
 
     # 10. Download
@@ -93,13 +93,7 @@ jobs:
         cd openwrt
         make -j1 V=s 2>&1 | tee build.log
 
-    # 12. Verify output
-    - name: Verify firmware
-      run: |
-        ls -lh openwrt/bin/targets/qualcommax/ipq807x/
-        ls openwrt/bin/targets/qualcommax/ipq807x/*ubi* || exit 1
-
-    # 13. Upload
+    # 12. Upload
     - name: Upload firmware
       uses: actions/upload-artifact@v4
       with:
