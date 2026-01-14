@@ -22,5 +22,5 @@
 #./scripts/feeds install -a -p qmodem
 #echo 'src-git passwall https://github.com/xiaorouji/openwrt-passwall' >>feeds.conf.default
 # 跳过 mx4200 DTS，避免 patch 失败
-sed -i '/ipq8174-mx4200.dtsi/d' \
+#sed -i '/ipq8174-mx4200.dtsi/d' \
 #target/linux/qualcommax/patches-6.6/*.patch
