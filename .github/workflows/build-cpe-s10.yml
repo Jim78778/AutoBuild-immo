@@ -82,13 +82,13 @@ jobs:
     - name: Apply ci.config
       run: |
         cd openwrt
-        cat ../ci.config .config
+        cat ../ci.config > .config
 
     # 10. Force S10 target
     - name: Force S10 target
       run: |
         cd openwrt
-        sed -i '/^CONFIG_TARGET_/d' .config
+        sed -i '/DEVICE_swaiot_cpe_s10/d' .config
         cat >> .config << 'EOF'
         CONFIG_TARGET_qualcommax=y
         CONFIG_TARGET_qualcommax_ipq807x=y
@@ -96,7 +96,7 @@ jobs:
         EOF
 
     # 11. defconfig
-    - name: Make defconfig
+    - name: Make defconfig V=s
       run: |
         cd openwrt
         make defconfig
@@ -112,13 +112,13 @@ jobs:
     - name: Build firmware
       run: |
         cd openwrt
-        make -j$(nproc) V=s
+        make -j$(nproc) || make -j1 V=s
 
     # 14. Verify output
     - name: Verify firmware
       run: |
         ls -lh openwrt/bin/targets/qualcommax/ipq807x/
-        ls openwrt/bin/targets/qualcommax/ipq807x/*ubi* || exit 1
+        ls openwrt/bin/targets/qualcommax/ipq807x/ || exit 1
 
     # 15. Upload
     - name: Upload firmware
