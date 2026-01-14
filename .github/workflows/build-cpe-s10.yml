@@ -91,7 +91,7 @@ jobs:
     - name: Build firmware
       run: |
         cd openwrt
-        make -j$(nproc) V=s
+        make -j1 V=s 2>&1 | tee build.log
 
     # 12. Verify output
     - name: Verify firmware
