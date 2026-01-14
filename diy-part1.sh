@@ -11,7 +11,7 @@
 #
 #./scripts/feeds update -a && rm -rf feeds/luci/applications/luci-app-mosdns && rm -rf feeds/packages/net/{alist,adguardhome,mosdns,smartdns}
 #rm -rf feeds/packages/lang/golang
-git clone https://github.com/kenzok8/golang feeds/packages/lang/golang
+#git clone https://github.com/kenzok8/golang feeds/packages/lang/golang
 
 # Uncomment a feed source
 #sed -i 's/^#\(.*helloworld\)/\1/' feeds.conf.default
@@ -23,4 +23,4 @@ git clone https://github.com/kenzok8/golang feeds/packages/lang/golang
 #echo 'src-git passwall https://github.com/xiaorouji/openwrt-passwall' >>feeds.conf.default
 # 跳过 mx4200 DTS，避免 patch 失败
 sed -i '/ipq8174-mx4200.dtsi/d' \
-target/linux/qualcommax/patches-6.6/*.patch
+#target/linux/qualcommax/patches-6.6/*.patch
