@@ -59,8 +59,9 @@ jobs:
     - name: Update & install feeds
       run: |
         cd openwrt
-        ./scripts/feeds update -a
-        ./scripts/feeds install -a -f
+        ./scripts/feeds update qmodem
+        ./scripts/feeds install -a -p qmodem
+        ./scripts/feeds install -a -f -p qmodem
 
     # ---------------------------
     # 6. Patch QModem dependencies
