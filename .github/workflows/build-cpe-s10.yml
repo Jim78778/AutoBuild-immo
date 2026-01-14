@@ -1,520 +1,154 @@
-name: 编译 OpenWrt 固件
+name: Build Swaiot CPE-S10 ImmortalWrt
 
 on:
-  repository_dispatch:
   workflow_dispatch:
-    inputs:
-      ssh:
-        description: 'SSH 连接至 Actions'
-        required: false
-        default: 'false'
-      cache:
-        description: '使用构建缓存'
-        required: false
-        default: 'true'
-      clean_build:
-        description: '全新构建（不使用缓存）'
-        required: false
-        default: 'false'
-      config_source:
-        description: '配置文件来源'
-        required: false
-        default: 'ci.config'
-        type: choice
-        options:
-          - ci.config
-          - .config
-          - both
-  schedule:
-    - cron: '0 8 * * 1'  # 每周一早上8点触发编译
   push:
     branches:
       - main
-      - master
-    paths:
-      - '**.config'
-      - 'ci.config'
-      - '**.sh'
-      - '**/files/**'
 
 env:
-  REPO_URL: https://github.com/Jim78778/immortalwrt-ipq.git
-  REPO_BRANCH: Jim78778-patch-1
-  FEEDS_CONF: feeds.conf.default
-  CONFIG_FILE: ci.config
-  DIY_P1_SH: diy-part1.sh
-  DIY_P2_SH: diy-part2.sh
-  UPLOAD_BIN_DIR: "false"
-  UPLOAD_FIRMWARE: "true"
-  UPLOAD_COUNT: 3
   TZ: Asia/Shanghai
-  BUILD_DIR: /workdir/openwrt
 
 jobs:
   build:
     runs-on: ubuntu-22.04
-    timeout-minutes: 240
-    
+
     steps:
-    - name: 检查工作空间
-      run: |
-        df -h
-        echo "CPU 核心数: $(nproc)"
-        echo "内存总量: $(free -h | awk '/^Mem:/{print $2}')"
-
-    - name: 最大化编译空间
-      uses: easimon/maximize-build-space@master
-      with:
-        root-reserve-mb: 2048
-        swap-size-mb: 2048
-        build-mount-path: /workdir
-        overprovision-lvm: 'true'
-        remove-dotnet: 'true'
-        remove-android: 'true'
-        remove-haskell: 'true'
-        remove-codeql: 'true'
-        remove-docker-images: 'true'
-
-    - name: 检出代码仓库
+    # -------------------------------------------------
+    # 1. Checkout（只拿 workflow 仓库）
+    # -------------------------------------------------
+    - name: Checkout
       uses: actions/checkout@v4
-      with:
-        submodules: recursive
-        fetch-depth: 0
 
-    - name: 初始化编译环境
-      env:
-        DEBIAN_FRONTEND: noninteractive
-        TZ: Asia/Shanghai
+    # -------------------------------------------------
+    # 2. Install full build dependencies（完整表）
+    # -------------------------------------------------
+    - name: Install dependencies
       run: |
+        sudo apt update
+        sudo apt install -y \
+          ack antlr3 asciidoc autoconf automake autopoint binutils \
+          bison build-essential bzip2 ccache clang cmake cpio curl \
+          device-tree-compiler ecj fastjar flex gawk gettext gcc-multilib \
+          g++-multilib git gnutls-dev gperf haveged help2man intltool \
+          lib32gcc-s1 libc6-dev-i386 libelf-dev libglib2.0-dev libgmp3-dev \
+          libltdl-dev libmpc-dev libmpfr-dev libncurses-dev libpython3-dev \
+          libreadline-dev libssl-dev libtool libyaml-dev libz-dev lld llvm \
+          lrzsz mkisofs msmtp nano ninja-build p7zip p7zip-full patch pkgconf \
+          python3 python3-pip python3-ply python3-docutils python3-pyelftools \
+          qemu-utils re2c rsync scons squashfs-tools subversion swig texinfo \
+          uglifyjs upx-ucl unzip vim wget xmlto xxd zlib1g-dev zstd jq
         sudo timedatectl set-timezone "$TZ"
-        
-        # 清理不必要的包
-        sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/lib/google-cloud-sdk
-        
-        # 更新和安装依赖
-        sudo apt-get update -qq
-        sudo apt-get upgrade -y -qq
-        
-        # 基础编译工具
-        sudo apt-get install -y -qq \
-          build-essential \
-          ccache \
-          ecj \
-          fastjar \
-          file \
-          g++ \
-          gawk \
-          gettext \
-          git \
-          java-propose-classpath \
-          libelf-dev \
-          libncurses5-dev \
-          libncursesw5-dev \
-          libssl-dev \
-          python3 \
-          python3-pip \
-          python3-setuptools \
-          python3-dev \
-          rsync \
-          subversion \
-          swig \
-          time \
-          xsltproc \
-          zlib1g-dev
-        
-        # 额外的 OpenWrt 依赖
-        sudo apt-get install -y -qq \
-          asciidoc \
-          binutils \
-          bzip2 \
-          flex \
-          help2man \
-          intltool \
-          libgmp3-dev \
-          libltdl-dev \
-          libtool \
-          libtool-bin \
-          make \
-          unzip
-        
-        sudo apt-get autoremove -y -qq
-        sudo apt-get clean -qq
-        
-        # 创建工作目录
-        sudo mkdir -p /workdir
-        sudo chown -R $(id -u):$(id -g) /workdir
-        
-        # 设置 ccache
-        echo "CCACHE_DIR=/workdir/.ccache" >> $GITHUB_ENV
-        ccache --max-size=2G
-        ccache --show-stats
 
-    - name: 克隆 OpenWrt 源码
-      working-directory: /workdir
+    # -------------------------------------------------
+    # 3. Clone ImmortalWrt
+    # -------------------------------------------------
+    - name: Clone ImmortalWrt
       run: |
-        # 清理之前的构建
-        if [ "${{ github.event.inputs.clean_build }}" = "true" ]; then
-          rm -rf openwrt
-        fi
-        
-        # 克隆源码
-        if [ ! -d "openwrt/.git" ]; then
-          git clone --depth=1 $REPO_URL -b $REPO_BRANCH openwrt
-        else
-          cd openwrt
-          git fetch origin $REPO_BRANCH
-          git reset --hard origin/$REPO_BRANCH
-          git clean -fd
-          cd ..
-        fi
-        
-        # 创建符号链接
-        ln -sfn /workdir/openwrt $GITHUB_WORKSPACE/openwrt
-        echo "BUILD_DIR=/workdir/openwrt" >> $GITHUB_ENV
+        git clone --depth=1 https://github.com/immortalwrt/immortalwrt.git openwrt
+        cd openwrt
+        ./scripts/getver.sh
 
-    - name: 缓存构建
-      if: github.event.inputs.cache == 'true' && github.event.inputs.clean_build != 'true'
-      uses: actions/cache@v4
-      with:
-        path: |
-          /workdir/.ccache
-          /workdir/openwrt/dl
-          /workdir/openwrt/build_dir
-        key: ${{ runner.os }}-openwrt-${{ hashFiles('.config', 'ci.config', 'feeds.conf.default', 'diy-part1.sh', 'diy-part2.sh') }}
-        restore-keys: |
-          ${{ runner.os }}-openwrt-
-
-    - name: 加载自定义脚本（第一部分）
-      working-directory: ${{ env.BUILD_DIR }}
+    # -------------------------------------------------
+    # 4. Add QModem feed
+    # -------------------------------------------------
+    - name: Add QModem feed
       run: |
-        # 确保 feeds.conf.default 存在
-        if [ ! -f feeds.conf.default ]; then
-          cp $GITHUB_WORKSPACE/feeds.conf.default feeds.conf.default 2>/dev/null || true
-        fi
-        
-        # 添加 qmodem feed（如果不存在）
-        if ! grep -q "qmodem" feeds.conf.default; then
-          echo 'src-git qmodem https://github.com/FUjr/QModem.git;main' >> feeds.conf.default
-        fi
-        
-        # 执行自定义脚本
-        if [ -f "$GITHUB_WORKSPACE/$DIY_P1_SH" ]; then
-          chmod +x "$GITHUB_WORKSPACE/$DIY_P1_SH"
-          "$GITHUB_WORKSPACE/$DIY_P1_SH"
-        fi
+        cd openwrt
+        echo 'src-git qmodem https://github.com/FUjr/QModem.git;main' >> feeds.conf.default
+        tail -n 5 feeds.conf.default
 
-    - name: 更新和安装 feeds
-      working-directory: ${{ env.BUILD_DIR }}
+    # -------------------------------------------------
+    # 5. Update & install feeds
+    # -------------------------------------------------
+    - name: Update feeds
       run: |
-        # 更新所有 feeds
+        cd openwrt
         ./scripts/feeds update -a
-        
-        # 安装所有包，强制覆盖
-        ./scripts/feeds install -a -f
-        
-        # 确保 qmodem 相关包安装
-        ./scripts/feeds install -p qmodem -a -f 2>/dev/null || true
+        ./scripts/feeds install -a
 
-    - name: 加载配置文件（处理 .config 和 ci.config）
-      working-directory: ${{ env.BUILD_DIR }}
+    # -------------------------------------------------
+    # 6. Apply diy-part1（你自己的逻辑）
+    # -------------------------------------------------
+    - name: DIY part 1
       run: |
-        # 复制文件目录
-        if [ -d "$GITHUB_WORKSPACE/files" ]; then
-          cp -rf "$GITHUB_WORKSPACE/files" .
+        cd openwrt
+        if [ -f ../diy-part1.sh ]; then
+          chmod +x ../diy-part1.sh
+          ../diy-part1.sh
         fi
-        
-        # 根据配置源选项选择配置文件
-        CONFIG_SOURCE="${{ github.event.inputs.config_source }}"
-        
-        echo "=== 配置文件处理 ==="
-        echo "配置源选项: ${CONFIG_SOURCE:-ci.config}"
-        
-        # 方法1：优先使用 ci.config（默认）
-        if [ "${CONFIG_SOURCE:-ci.config}" = "ci.config" ] || [ "${CONFIG_SOURCE}" = "both" ]; then
-          if [ -f "$GITHUB_WORKSPACE/$CONFIG_FILE" ]; then
-            echo "使用 ci.config 作为主配置文件"
-            cp "$GITHUB_WORKSPACE/$CONFIG_FILE" .config
-            
-            # 如果有 .config 且选择了 both，则合并配置
-            if [ "${CONFIG_SOURCE}" = "both" ] && [ -f "$GITHUB_WORKSPACE/.config" ]; then
-              echo "合并 .config 中的配置到 ci.config"
-              # 提取 .config 中的配置，排除注释和空行
-              grep -v '^#' "$GITHUB_WORKSPACE/.config" | grep -v '^$' >> .config || true
-            fi
-          elif [ -f "$GITHUB_WORKSPACE/.config" ]; then
-            echo "ci.config 不存在，使用 .config"
-            cp "$GITHUB_WORKSPACE/.config" .config
-          else
-            echo "警告：未找到配置文件，将使用默认配置"
-            echo "# 自动生成的最小配置" > .config
-            echo "CONFIG_TARGET_ipq40xx=y" >> .config
-            echo "CONFIG_TARGET_ipq40xx_generic=y" >> .config
-          fi
-        
-        # 方法2：只使用 .config
-        elif [ "${CONFIG_SOURCE}" = ".config" ]; then
-          if [ -f "$GITHUB_WORKSPACE/.config" ]; then
-            echo "使用 .config 作为配置文件"
-            cp "$GITHUB_WORKSPACE/.config" .config
-          else
-            echo "错误：未找到 .config 文件"
-            exit 1
-          fi
-        fi
-        
-        # 显示配置文件基本信息
-        echo "=== 配置文件信息 ==="
-        echo "配置行数: $(wc -l < .config)"
-        echo "启用包数量: $(grep -c '=y$' .config)"
-        echo "模块数量: $(grep -c '=m$' .config)"
-        
-        # 检查重要配置
-        echo "=== 重要配置检查 ==="
-        for config in "CONFIG_TARGET" "CONFIG_PACKAGE_kmod-qmodem" "CONFIG_PACKAGE_luci"; do
-          if grep -q "^${config}=" .config; then
-            echo "${config}: $(grep "^${config}=" .config)"
-          fi
-        done
 
-    - name: 强制启用 qmodem 驱动
-      working-directory: ${{ env.BUILD_DIR }}
+    # -------------------------------------------------
+    # 7. Apply ci.config（关键）
+    # -------------------------------------------------
+    - name: Apply ci.config
       run: |
-        echo "=== 配置 qmodem 驱动 ==="
-        
-        # 检查是否已启用 qmodem
-        if grep -q '^CONFIG_PACKAGE_kmod-qmodem=y$' .config; then
-          echo "qmodem 已在配置中启用"
-        else
-          echo "强制启用 qmodem 驱动"
-          # 先删除可能存在的禁用配置
-          sed -i '/^CONFIG_PACKAGE_kmod-qmodem=/d' .config
-          # 添加启用配置
-          echo "CONFIG_PACKAGE_kmod-qmodem=y" >> .config
-          echo "CONFIG_PACKAGE_qmodem-utils=y" >> .config
-        fi
-        
-        # 确保相关依赖也启用
-        echo "CONFIG_PACKAGE_luci-proto-3g=y" >> .config
-        echo "CONFIG_PACKAGE_usb-modeswitch=y" >> .config
-        
-        # 显示最终 qmodem 配置
-        echo "=== 最终的 qmodem 相关配置 ==="
-        grep -i "qmodem" .config || echo "警告：未找到 qmodem 配置"
+        cd openwrt
+        cp ../ci.config .config
 
-    - name: 执行自定义脚本（第二部分）
-      working-directory: ${{ env.BUILD_DIR }}
+    # -------------------------------------------------
+    # 8. Force CPE-S10 target（防 defconfig 覆盖）
+    # -------------------------------------------------
+    - name: Force CPE-S10 target
       run: |
-        # 执行自定义脚本
-        if [ -f "$GITHUB_WORKSPACE/$DIY_P2_SH" ]; then
-          chmod +x "$GITHUB_WORKSPACE/$DIY_P2_SH"
-          echo "正在执行 $DIY_P2_SH..."
-          "$GITHUB_WORKSPACE/$DIY_P2_SH"
-          echo "自定义脚本执行完成"
-        fi
-        
-        # 运行 defconfig 来自动处理依赖关系
-        echo "运行 make defconfig 处理依赖..."
+        cd openwrt
+        sed -i '/^CONFIG_TARGET_/d' .config
+        cat >> .config << 'EOF'
+        CONFIG_TARGET_qualcommax=y
+        CONFIG_TARGET_qualcommax_ipq807x=y
+        CONFIG_TARGET_qualcommax_ipq807x_DEVICE_swaiot_cpe_s10=y
+        EOF
+        grep CONFIG_TARGET_ .config
+
+    # -------------------------------------------------
+    # 9. Ensure QModem + MHI + PCIe (核心修复点)
+    # -------------------------------------------------
+    - name: Enable QModem & MHI
+      run: |
+        cd openwrt
+        cat >> .config << 'EOF'
+        CONFIG_PACKAGE_qmodem=y
+        CONFIG_PACKAGE_luci-app-qmodem=y
+        CONFIG_PACKAGE_kmod-mhi-wwan=y
+        CONFIG_PACKAGE_kmod-mhi-wwan-ctrl=y
+        CONFIG_PACKAGE_kmod-mhi-pci-generic=y
+        CONFIG_PACKAGE_kmod-pcie_mhi=y
+        CONFIG_PCI=y
+        CONFIG_PCIE_QCOM=y
+        EOF
+
+    # -------------------------------------------------
+    # 10. defconfig
+    # -------------------------------------------------
+    - name: Make defconfig
+      run: |
+        cd openwrt
         make defconfig
-        
-        # 显示配置差异（如果有）
-        if [ -f "$GITHUB_WORKSPACE/.config" ] || [ -f "$GITHUB_WORKSPACE/$CONFIG_FILE" ]; then
-          echo "=== 配置变更摘要 ==="
-          # 这里可以添加配置比较逻辑
-          echo "配置文件已更新并应用"
-        fi
+        grep -E 'QMODEM|MHI|PCIE' .config || true
 
-    - name: 检测系统性能
-      id: detect
+    # -------------------------------------------------
+    # 11. Download
+    # -------------------------------------------------
+    - name: Download packages
       run: |
-        CPU_COUNT=$(nproc)
-        MEM_TOTAL=$(grep MemTotal /proc/meminfo | awk '{print $2}')
-        
-        echo "CPU_COUNT=$CPU_COUNT" >> $GITHUB_ENV
-        echo "MEM_TOTAL=$MEM_TOTAL" >> $GITHUB_ENV
-        
-        # 内存不足时创建交换空间
-        if [ $MEM_TOTAL -lt 12000000 ]; then
-          echo "检测到内存小于 12GB，正在创建 4GB 交换空间..."
-          sudo fallocate -l 4G /swapfile
-          sudo chmod 600 /swapfile
-          sudo mkswap /swapfile
-          sudo swapon /swapfile
-          sudo swapon --show
-        fi
-        
-        # 根据系统资源调整编译线程数
-        if [ $CPU_COUNT -ge 8 ] && [ $MEM_TOTAL -ge 32000000 ]; then
-          MAKE_JOBS=$((CPU_COUNT))
-        elif [ $CPU_COUNT -ge 4 ] && [ $MEM_TOTAL -ge 16000000 ]; then
-          MAKE_JOBS=$((CPU_COUNT))
-        elif [ $CPU_COUNT -ge 2 ] && [ $MEM_TOTAL -ge 8000000 ]; then
-          MAKE_JOBS=$((CPU_COUNT))
-        else
-          MAKE_JOBS=1
-        fi
-        
-        # 限制最大线程数
-        if [ $MAKE_JOBS -gt 16 ]; then
-          MAKE_JOBS=16
-        fi
-        
-        echo "MAKE_JOBS=$MAKE_JOBS" >> $GITHUB_ENV
-        echo "将使用 $MAKE_JOBS 个编译线程"
+        cd openwrt
+        make download -j$(nproc)
 
-    - name: 下载软件包
-      working-directory: ${{ env.BUILD_DIR }}
-      timeout-minutes: 30
+    # -------------------------------------------------
+    # 12. Build
+    # -------------------------------------------------
+    - name: Build firmware
       run: |
-        echo "开始下载软件包..."
-        
-        # 下载包（尝试多线程，失败则单线程）
-        make download -j${{ env.MAKE_JOBS }} || {
-          echo "多线程下载失败，尝试单线程下载..."
-          make download -j1
-        }
-        
-        # 检查下载完整性
-        echo "检查软件包下载完整性..."
-        make -j1 V=s download 2>&1 | tail -50 || true
+        cd openwrt
+        make -j$(nproc) V=s
 
-    - name: 编译固件
-      id: compile
-      working-directory: ${{ env.BUILD_DIR }}
-      timeout-minutes: 180
-      env:
-        FORCE_UNSAFE_CONFIGURE: 1
-      run: |
-        echo "开始编译固件，使用 $MAKE_JOBS 线程..."
-        
-        # 显示 ccache 统计
-        ccache --show-stats
-        
-        # 显示编译配置摘要
-        echo "=== 编译配置摘要 ==="
-        echo "目标架构: $(grep '^CONFIG_TARGET_ARCH=' .config | cut -d= -f2 2>/dev/null || echo '未知')"
-        echo "目标设备: $(grep '^CONFIG_TARGET_BOARD=' .config | cut -d= -f2 2>/dev/null || echo '未知')"
-        echo "目标子类型: $(grep '^CONFIG_TARGET_SUBTARGET=' .config | cut -d= -f2 2>/dev/null || echo '未知')"
-        
-        # 编译核心
-        if [ $MAKE_JOBS -le 2 ]; then
-          make -j$MAKE_JOBS V=s 2>&1 | tee build.log
-        else
-          make -j$MAKE_JOBS 2>&1 | tee build.log
-        fi
-        
-        # 检查编译结果
-        if [ $? -eq 0 ]; then
-          echo "编译成功！"
-          
-          # 获取设备名称
-          if grep -q '^CONFIG_TARGET.*DEVICE.*=y' .config; then
-            DEVICE_NAME=$(grep '^CONFIG_TARGET.*DEVICE.*=y' .config | head -1 | sed -r 's/.*DEVICE_(.*)=y/\1/')
-            echo "DEVICE_NAME=_${DEVICE_NAME}" >> $GITHUB_ENV
-          else
-            echo "DEVICE_NAME=" >> $GITHUB_ENV
-          fi
-          
-          # 获取固件日期和版本
-          echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
-          
-          # 尝试获取版本号
-          if [ -f version.date ]; then
-            VERSION=$(cat version.date)
-            echo "OPENWRT_VERSION=${VERSION}" >> $GITHUB_ENV
-          fi
-          
-          # 记录编译信息
-          echo "BUILD_TIME=$(date)" >> $GITHUB_ENV
-          echo "GITHUB_SHA=${GITHUB_SHA}" >> $GITHUB_ENV
-          
-        else
-          echo "编译失败，正在尝试单线程详细输出..."
-          tail -100 build.log
-          echo "=== 详细错误日志 ==="
-          make -j1 V=s 2>&1 | tail -200
-          exit 1
-        fi
-        
-        # 显示 ccache 最终统计
-        ccache --show-stats
-
-    - name: 整理固件文件
-      if: success()
-      working-directory: ${{ env.BUILD_DIR }}
-      run: |
-        # 查找固件目录
-        if [ -d "bin/targets" ]; then
-          cd bin/targets
-          TARGET_PATH=$(find . -name "*.bin" -o -name "*.img" -o -name "*.gz" | head -1 | xargs dirname 2>/dev/null || echo ".")
-          FIRMWARE_PATH="$PWD/${TARGET_PATH#./}"
-          echo "FIRMWARE=${FIRMWARE_PATH}" >> $GITHUB_ENV
-          echo "固件路径：${FIRMWARE_PATH}"
-          
-          # 删除不必要的文件
-          rm -rf packages 2>/dev/null || true
-          
-          # 列出生成的固件
-          echo "=== 生成的固件文件 ==="
-          find "$FIRMWARE_PATH" -type f \( -name "*.bin" -o -name "*.img" -o -name "*.gz" -o -name "*.tar" \) | sort
-          
-          # 计算文件大小
-          echo "=== 文件大小 ==="
-          du -h "$FIRMWARE_PATH"/* 2>/dev/null || true
-          
-          # 创建文件列表
-          find "$FIRMWARE_PATH" -type f \( -name "*.bin" -o -name "*.img" -o -name "*.gz" -o -name "*.tar" \) -exec basename {} \; > firmware_list.txt
-          echo "FIRMWARE_LIST=$(cat firmware_list.txt | tr '\n' ',')" >> $GITHUB_ENV
-        else
-          echo "错误：未找到固件目录"
-          exit 1
-        fi
-
-    - name: 上传固件制品
-      if: env.UPLOAD_FIRMWARE == 'true' && success()
+    # -------------------------------------------------
+    # 13. Upload firmware
+    # -------------------------------------------------
+    - name: Upload firmware
       uses: actions/upload-artifact@v4
       with:
-        name: OpenWrt_固件${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
-        path: ${{ env.FIRMWARE }}
-        retention-days: 7
-        if-no-files-found: error
+        name: CPE-S10-firmware
+        path: openwrt/bin/targets/
+        retention-days: 30
 
-    - name: 上传配置文件制品
-      if: success()
-      uses: actions/upload-artifact@v4
-      with:
-        name: 配置文件_${{ env.FILE_DATE }}
-        path: |
-          ${{ env.BUILD_DIR }}/.config
-          $GITHUB_WORKSPACE/.config
-          $GITHUB_WORKSPACE/ci.config
-        retention-days: 7
-        if-no-files-found: warn
-
-    - name: 上传编译日志
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: 编译日志_${{ env.FILE_DATE }}
-        path: |
-          ${{ env.BUILD_DIR }}/build.log
-          ${{ env.BUILD_DIR }}/firmware_list.txt
-        retention-days: 3
-
-    - name: 清理工作空间
-      if: always()
-      run: |
-        # 显示磁盘使用情况
-        echo "=== 最终磁盘使用情况 ==="
-        df -h
-        
-        # 清理临时文件
-        sudo rm -f /swapfile 2>/dev/null || true
-        
-        # 显示 ccache 命中率
-        ccache --show-stats || true
-
-    - name: 设置 SSH 调试
-      if: failure() && github.event.inputs.ssh == 'true'
-      uses: mxschmitt/action-tmate@v3
-      with:
-        limit-access-to-actor: true
