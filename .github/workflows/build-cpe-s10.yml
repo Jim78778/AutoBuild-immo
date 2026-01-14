@@ -8,125 +8,103 @@ on:
 
 env:
   TZ: Asia/Shanghai
-  MAKE_JOBS: 8
 
 jobs:
   build:
     runs-on: ubuntu-22.04
 
     steps:
-    # ---------------------------
-    # 1. Checkout
-    # ---------------------------
-    - name: Checkout ImmortalWrt source
-      uses: actions/checkout@v4
+    # 1. Checkout CI repo
+    - uses: actions/checkout@v4
 
-    # ---------------------------
-    # 2. Setup environment
-    # ---------------------------
-    - name: Install dependencies
+    # 2. Install dependencies
+    - name: Install build dependencies
       run: |
         sudo apt update
         sudo apt install -y \
-          build-essential gcc g++ gawk flex bison gettext libncurses-dev \
-          libssl-dev zlib1g-dev file wget curl unzip git rsync python3 python3-distutils \
-          ca-certificates ccache make cmake ninja-build autoconf automake \
-          texinfo libtool lsb-release pkg-config bzip2 bc python3-pip
+          ack antlr3 asciidoc autoconf automake autopoint binutils \
+          bison build-essential bzip2 ccache clang cmake cpio curl \
+          device-tree-compiler flex gawk gettext git gperf help2man \
+          intltool libelf-dev libncurses-dev libssl-dev python3 \
+          python3-distutils rsync unzip wget zlib1g-dev zstd
         sudo timedatectl set-timezone "$TZ"
 
-    # ---------------------------
-    # 3. Clone ImmortalWrt
-    # ---------------------------
+    # 3. Clone ImmortalWrt (your branch)
     - name: Clone ImmortalWrt
       run: |
-        git clone --depth=1 https://github.com/immortalwrt/immortalwrt.git openwrt
+        git clone https://github.com/Jim78778/immortalwrt-ipq.git openwrt
         cd openwrt
-        echo "IMMORTALWRT HEAD:"
-        git log -1 --oneline
+        git checkout Jim78778-patch-1
+        ./scripts/getver.sh
 
-    # ---------------------------
-    # 4. Add QModem feed
-    # ---------------------------
+    # 4. Verify device exists
+    - name: Verify S10 device
+      run: |
+        cd openwrt
+        grep -R "Device/swaiot_cpe_s10" target/linux/qualcommax/image || exit 1
+        test -f target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/ipq8071-s10.dts
+
+    # 5. Add QModem feed
     - name: Add QModem feed
       run: |
         cd openwrt
-        echo "src-git qmodem https://github.com/FUjr/QModem.git;main" >> feeds.conf.default
-        tail -n 3 feeds.conf.default
+        echo 'src-git qmodem https://github.com/FUjr/QModem.git;main' >> feeds.conf.default
 
-    # ---------------------------
-    # 5. Update & install feeds
-    # ---------------------------
-    - name: Update & install feeds
+    # 6. Update feeds
+    - name: Update feeds
       run: |
         cd openwrt
-        ./scripts/feeds update qmodem
-        ./scripts/feeds install -a -p qmodem
-        ./scripts/feeds install -a -f -p qmodem
+        ./scripts/feeds update -a
+        ./scripts/feeds install -a
 
-    # ---------------------------
-    # 6. Patch QModem dependencies
-    # ---------------------------
-    - name: Patch QModem Makefile
+    # 7. Apply ci.config
+    - name: Apply ci.config
       run: |
         cd openwrt
-        if [ ! -f package/feeds/qmodem/qmodem/Makefile ]; then
-          echo "ERROR: QModem Makefile not found"
-          exit 1
-        fi
-        sed -i \
-          -e 's/kmod-mhi-wwan/kmod-mhi-wwan-mbim kmod-mhi-wwan-ctrl/g' \
-          -e 's/quectel-CM-5G//g' \
-          package/feeds/qmodem/qmodem/Makefile
-        sed -i -e 's/quectel-CM-5G//g' package/feeds/qmodem/luci-app-qmodem/Makefile
-        echo "=== Patched QModem deps ==="
-        grep DEPENDS package/feeds/qmodem/qmodem/Makefile || true
+        cat ../ci.config >> .config
 
-    # ---------------------------
-    # 7. Force CPE-S10 target
-    # ---------------------------
-    - name: Force CPE-S10 target
+    # 8. Force target
+    - name: Force S10 target
       run: |
         cd openwrt
-        # 清空旧 target
-        sed -i '/^CONFIG_TARGET_/d' .config || true
-        printf '%s\n' \
-          'CONFIG_TARGET_qualcommax=y' \
-          'CONFIG_TARGET_qualcommax_ipq807x=y' \
-          'CONFIG_TARGET_qualcommax_ipq807x_DEVICE_swaiot_cpe_s10=y' \
-          >> .config
-        grep CONFIG_TARGET_ .config
+        sed -i '/^CONFIG_TARGET_/d' .config
+        cat >> .config << 'EOF'
+        CONFIG_TARGET_qualcommax=y
+        CONFIG_TARGET_qualcommax_ipq807x=y
+        CONFIG_TARGET_qualcommax_ipq807x_DEVICE_swaiot_cpe_s10=y
+        EOF
 
-    # ---------------------------
-    # 8. Make defconfig
-    # ---------------------------
+    # 9. defconfig
     - name: Make defconfig
       run: |
         cd openwrt
         make defconfig
-        grep CONFIG_TARGET_ .config
+        grep swaiot_cpe_s10 .config || exit 1
 
-    # ---------------------------
-    # 9. Download sources
-    # ---------------------------
+    # 10. Download
     - name: Download packages
       run: |
         cd openwrt
-        make download -j$MAKE_JOBS
+        make download -j$(nproc)
 
-    # ---------------------------
-    # 10. Build firmware
-    # ---------------------------
+    # 11. Build
     - name: Build firmware
       run: |
         cd openwrt
-        make -j$MAKE_JOBS V=s
+        make -j$(nproc) V=s
 
-    # ---------------------------
-    # 11. Upload firmware
-    # ---------------------------
+    # 12. Verify output
+    - name: Verify firmware
+      run: |
+        ls -lh openwrt/bin/targets/qualcommax/ipq807x/
+        ls openwrt/bin/targets/qualcommax/ipq807x/*ubi* || exit 1
+
+    # 13. Upload
     - name: Upload firmware
       uses: actions/upload-artifact@v4
       with:
+        name: Swaiot-CPE-S10
+        path: openwrt/bin/targets/qualcommax/ipq807x/*
         name: CPE-S10-firmware
         path: openwrt/bin/targets/
         retention-days: 30
