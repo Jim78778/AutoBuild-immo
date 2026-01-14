@@ -82,7 +82,7 @@ jobs:
     - name: Apply ci.config
       run: |
         cd openwrt
-        cp $GITHUB_WORKSPACE/ci.config .config
+        cp ../ci.config .config
 
     # 10. Force S10 target
     - name: Force S10 target
