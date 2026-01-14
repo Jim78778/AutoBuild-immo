@@ -14,82 +14,57 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-    # -------------------------------------------------
-    # 1. Checkout（只拿 workflow 仓库）
-    # -------------------------------------------------
-    - name: Checkout
-      uses: actions/checkout@v4
+    # 1. Checkout CI repo
+    - uses: actions/checkout@v4
 
-    # -------------------------------------------------
-    # 2. Install full build dependencies（完整表）
-    # -------------------------------------------------
-    - name: Install dependencies
+    # 2. Install dependencies
+    - name: Install build dependencies
       run: |
         sudo apt update
         sudo apt install -y \
           ack antlr3 asciidoc autoconf automake autopoint binutils \
           bison build-essential bzip2 ccache clang cmake cpio curl \
-          device-tree-compiler ecj fastjar flex gawk gettext gcc-multilib \
-          g++-multilib git gnutls-dev gperf haveged help2man intltool \
-          lib32gcc-s1 libc6-dev-i386 libelf-dev libglib2.0-dev libgmp3-dev \
-          libltdl-dev libmpc-dev libmpfr-dev libncurses-dev libpython3-dev \
-          libreadline-dev libssl-dev libtool libyaml-dev libz-dev lld llvm \
-          lrzsz mkisofs msmtp nano ninja-build p7zip p7zip-full patch pkgconf \
-          python3 python3-pip python3-ply python3-docutils python3-pyelftools \
-          qemu-utils re2c rsync scons squashfs-tools subversion swig texinfo \
-          uglifyjs upx-ucl unzip vim wget xmlto xxd zlib1g-dev zstd jq
+          device-tree-compiler flex gawk gettext git gperf help2man \
+          intltool libelf-dev libncurses-dev libssl-dev python3 \
+          python3-distutils rsync unzip wget zlib1g-dev zstd
         sudo timedatectl set-timezone "$TZ"
 
-    # -------------------------------------------------
-    # 3. Clone ImmortalWrt
-    # -------------------------------------------------
+    # 3. Clone ImmortalWrt (your branch)
     - name: Clone ImmortalWrt
       run: |
-        git clone --depth=1 https://github.com/immortalwrt/immortalwrt.git openwrt
+        git clone https://github.com/Jim78778/immortalwrt-ipq.git openwrt
         cd openwrt
+        git checkout Jim78778-patch-1
         ./scripts/getver.sh
 
-    # -------------------------------------------------
-    # 4. Add QModem feed
-    # -------------------------------------------------
+    # 4. Verify device exists
+    - name: Verify S10 device
+      run: |
+        cd openwrt
+        grep -R "Device/swaiot_cpe_s10" target/linux/qualcommax/image || exit 1
+        test -f target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/ipq8071-s10.dts
+
+    # 5. Add QModem feed
     - name: Add QModem feed
       run: |
         cd openwrt
         echo 'src-git qmodem https://github.com/FUjr/QModem.git;main' >> feeds.conf.default
-        tail -n 5 feeds.conf.default
 
-    # -------------------------------------------------
-    # 5. Update & install feeds
-    # -------------------------------------------------
+    # 6. Update feeds
     - name: Update feeds
       run: |
         cd openwrt
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
-    # -------------------------------------------------
-    # 6. Apply diy-part1（你自己的逻辑）
-    # -------------------------------------------------
-    - name: DIY part 1
-      run: |
-        cd openwrt
-        if [ -f ../diy-part1.sh ]; then
-          chmod +x ../diy-part1.sh
-          ../diy-part1.sh
-        fi
-
-    # -------------------------------------------------
-    # 7. Apply ci.config（关键）
-    # -------------------------------------------------
+    # 7. Apply ci.config
     - name: Apply ci.config
       run: |
         cd openwrt
-        cp ../ci.config .config
+        cat ../ci.config >> .config
 
-    # -------------------------------------------------
-    # 8. Force CPE-S10 target（防 defconfig 覆盖）
-    # -------------------------------------------------
-    - name: Force CPE-S10 target
+    # 8. Force target
+    - name: Force S10 target
       run: |
         cd openwrt
         sed -i '/^CONFIG_TARGET_/d' .config
@@ -98,57 +73,36 @@ jobs:
         CONFIG_TARGET_qualcommax_ipq807x=y
         CONFIG_TARGET_qualcommax_ipq807x_DEVICE_swaiot_cpe_s10=y
         EOF
-        grep CONFIG_TARGET_ .config
 
-    # -------------------------------------------------
-    # 9. Ensure QModem + MHI + PCIe (核心修复点)
-    # -------------------------------------------------
-    - name: Enable QModem & MHI
-      run: |
-        cd openwrt
-        cat >> .config << 'EOF'
-        CONFIG_PACKAGE_qmodem=y
-        CONFIG_PACKAGE_luci-app-qmodem=y
-        CONFIG_PACKAGE_kmod-mhi-wwan=y
-        CONFIG_PACKAGE_kmod-mhi-wwan-ctrl=y
-        CONFIG_PACKAGE_kmod-mhi-pci-generic=y
-        CONFIG_PACKAGE_kmod-pcie_mhi=y
-        CONFIG_PCI=y
-        CONFIG_PCIE_QCOM=y
-        EOF
-
-    # -------------------------------------------------
-    # 10. defconfig
-    # -------------------------------------------------
+    # 9. defconfig
     - name: Make defconfig
       run: |
         cd openwrt
         make defconfig
-        grep -E 'QMODEM|MHI|PCIE' .config || true
+        grep swaiot_cpe_s10 .config || exit 1
 
-    # -------------------------------------------------
-    # 11. Download
-    # -------------------------------------------------
+    # 10. Download
     - name: Download packages
       run: |
         cd openwrt
         make download -j$(nproc)
 
-    # -------------------------------------------------
-    # 12. Build
-    # -------------------------------------------------
+    # 11. Build
     - name: Build firmware
       run: |
         cd openwrt
         make -j$(nproc) V=s
 
-    # -------------------------------------------------
-    # 13. Upload firmware
-    # -------------------------------------------------
+    # 12. Verify output
+    - name: Verify firmware
+      run: |
+        ls -lh openwrt/bin/targets/qualcommax/ipq807x/
+        ls openwrt/bin/targets/qualcommax/ipq807x/*ubi* || exit 1
+
+    # 13. Upload
     - name: Upload firmware
       uses: actions/upload-artifact@v4
       with:
-        name: CPE-S10-firmware
-        path: openwrt/bin/targets/
-        retention-days: 30
+        name: Swaiot-CPE-S10
+        path: openwrt/bin/targets/qualcommax/ipq807x/*
 
