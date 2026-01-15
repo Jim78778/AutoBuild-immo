@@ -8,6 +8,7 @@ on:
 
 env:
   TZ: Asia/Shanghai
+  OPENWRT_DIR: /mnt/openwrt
 
 jobs:
   build:
@@ -29,9 +30,28 @@ jobs:
           python3-distutils rsync unzip wget zlib1g-dev zstd
         sudo timedatectl set-timezone "$TZ"
 
-    # 3. Clone ImmortalWrt (your branch)
+    # 2.5 System check (CPU / RAM / Disk)
+    - name: System resource check
+      run: |
+        echo "---------------- CPU ----------------"
+        nproc
+        lscpu | grep -E 'Model name|Socket|Thread|Core'
+        echo
+        echo "---------------- Memory ----------------"
+        free -h
+        echo
+        echo "---------------- Disk ----------------"
+        df -h
+        echo
+        echo "---------------- /mnt ----------------"
+        ls -lh /mnt || true
+
+    # 3. Clone ImmortalWrt (your branch) → /mnt
     - name: Clone ImmortalWrt
       run: |
+        sudo mkdir -p /mnt
+        sudo chown -R $USER:$USER /mnt
+        cd /mnt
         git clone https://github.com/Jim78778/immortalwrt-ipq.git openwrt
         cd openwrt
         git checkout Jim78778-patch-1
@@ -40,33 +60,33 @@ jobs:
     # 4. Verify device exists
     - name: Verify S10 device
       run: |
-        cd openwrt
+        cd $OPENWRT_DIR
         grep -R "Device/swaiot_cpe_s10" target/linux/qualcommax/image || exit 1
         test -f target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/ipq8071-s10.dts
 
     # 5. Add QModem feed
     - name: Add QModem feed
       run: |
-        cd openwrt
+        cd $OPENWRT_DIR
         echo 'src-git qmodem https://github.com/FUjr/QModem.git;main' >> feeds.conf.default
 
     # 6. Update feeds
     - name: Update feeds
       run: |
-        cd openwrt
+        cd $OPENWRT_DIR
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
     # 7. Apply ci.config
     - name: Apply ci.config
       run: |
-        cd openwrt
+        cd $OPENWRT_DIR
         cat ../ci.config >> .config
 
     # 8. Force target
     - name: Force S10 target
       run: |
-        cd openwrt
+        cd $OPENWRT_DIR
         sed -i '/^CONFIG_TARGET_/d' .config
         cat >> .config << 'EOF'
         CONFIG_TARGET_qualcommax=y
@@ -77,26 +97,29 @@ jobs:
     # 9. defconfig
     - name: Make defconfig
       run: |
-        cd openwrt
+        cd $OPENWRT_DIR
         make defconfig V=s
         grep swaiot_cpe_s10 .config || exit 1
 
     # 10. Download
     - name: Download packages
       run: |
-        cd openwrt
+        cd $OPENWRT_DIR
         make download -j$(nproc)
 
     # 11. Build
     - name: Build firmware
       run: |
-        cd openwrt
+        cd $OPENWRT_DIR
         make -j1 V=s 2>&1 | tee build.log
 
     # 12. Upload
     - name: Upload firmware
       uses: actions/upload-artifact@v4
       with:
+        name: Swaiot-CPE-S10
+        path: /mnt/openwrt/bin/targets/qualcommax/ipq807x/*
+
         name: Swaiot-CPE-S10
         path: openwrt/bin/targets/qualcommax/ipq807x/*
 
