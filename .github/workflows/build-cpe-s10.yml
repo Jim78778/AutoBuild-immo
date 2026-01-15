@@ -119,7 +119,3 @@ jobs:
       with:
         name: Swaiot-CPE-S10
         path: /mnt/openwrt/bin/targets/qualcommax/ipq807x/*
-
-        name: Swaiot-CPE-S10
-        path: openwrt/bin/targets/qualcommax/ipq807x/*
-
