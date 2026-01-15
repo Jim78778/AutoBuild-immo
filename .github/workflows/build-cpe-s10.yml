@@ -16,7 +16,8 @@ jobs:
 
     steps:
     # 1. Checkout CI repo
-    - uses: actions/checkout@v4
+    - name: Checkout CI repo
+      uses: actions/checkout@v4
 
     # 2. Install dependencies
     - name: Install build dependencies
@@ -30,7 +31,7 @@ jobs:
           python3-distutils rsync unzip wget zlib1g-dev zstd
         sudo timedatectl set-timezone "$TZ"
 
-    # 2.5 System check (CPU / RAM / Disk)
+    # 2.5 System check
     - name: System resource check
       run: |
         echo "---------------- CPU ----------------"
@@ -46,7 +47,7 @@ jobs:
         echo "---------------- /mnt ----------------"
         ls -lh /mnt || true
 
-    # 3. Clone ImmortalWrt (your branch) → /mnt
+    # 3. Clone ImmortalWrt (your branch)
     - name: Clone ImmortalWrt
       run: |
         sudo mkdir -p /mnt
@@ -64,6 +65,17 @@ jobs:
         grep -R "Device/swaiot_cpe_s10" target/linux/qualcommax/image || exit 1
         test -f target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/ipq8071-s10.dts
 
+    # 4.5 Import QCA NSS / ECM patches (kernel 6.6)
+    # 来源：qosmio/openwrt-ipq 24.10-nss
+    - name: Import QCA NSS / ECM patches
+      run: |
+        cd $OPENWRT_DIR
+        git clone --depth=1 https://github.com/qosmio/openwrt-ipq.git /tmp/ipq-nss
+        cp -r /tmp/ipq-nss/target/linux/qualcommax/patches-6.6/* \
+              target/linux/qualcommax/patches-6.6/
+        echo "Imported QCA NSS patches:"
+        ls target/linux/qualcommax/patches-6.6 | wc -l
+
     # 5. Add QModem feed
     - name: Add QModem feed
       run: |
@@ -80,10 +92,10 @@ jobs:
     # 7. Apply ci.config
     - name: Apply ci.config
       run: |
-         cd $OPENWRT_DIR
-         cat $GITHUB_WORKSPACE/ci.config >> .config
-    
-    # 8. Force target
+        cd $OPENWRT_DIR
+        cat $GITHUB_WORKSPACE/ci.config >> .config
+
+    # 8. Force target (Swaiot CPE-S10)
     - name: Force S10 target
       run: |
         cd $OPENWRT_DIR
@@ -98,22 +110,22 @@ jobs:
     - name: Make defconfig
       run: |
         cd $OPENWRT_DIR
-        make defconfig V=s
+        make defconfig
         grep swaiot_cpe_s10 .config || exit 1
 
-    # 10. Download
+    # 10. Download sources
     - name: Download packages
       run: |
         cd $OPENWRT_DIR
         make download -j$(nproc)
 
-    # 11. Build
+    # 11. Build firmware
     - name: Build firmware
       run: |
         cd $OPENWRT_DIR
         make -j1 V=s 2>&1 | tee build.log
 
-    # 12. Upload
+    # 12. Upload firmware
     - name: Upload firmware
       uses: actions/upload-artifact@v4
       with:
