@@ -65,6 +65,16 @@ jobs:
         git checkout Jim78778-patch-1
         ./scripts/getver.sh
 
+    # 6.5 Import QCA NSS / ECM patches (kernel 6.6)
+    - name: Import QCA NSS patches (inline)
+      run: |
+        cd $OPENWRT_DIR
+        git clone https://github.com/qosmio/openwrt-ipq.git /tmp/ipq-nss
+        cp -r /tmp/ipq-nss/target/linux/qualcommax/patches-6.6/* \
+              target/linux/qualcommax/patches-6.6/
+
+
+
     # 7. 校验设备 & DTS
     - name: Verify device exists
       run: |
