@@ -17,112 +17,121 @@ jobs:
     # 1. Checkout CI repo
     - uses: actions/checkout@v4
 
-    # 2. 检查服务器配置
-    - name: 检查服务器配置
+    # 2. 系统 & 资源检测（早发现，早中断）
+    - name: System check
       run: |
-        echo "若分配的服务器性能不足，务必及时取消，重新运行！"
-        echo -e "------------------------------- CPU信息 -------------------------------\n"
-        echo "CPU物理数量:$(grep 'physical id' /proc/cpuinfo | sort -u | wc -l)"
-        echo -e "CPU核心及版本信息: $(grep 'name' /proc/cpuinfo | cut -f2 -d: | uniq -c) \n"
-        echo -e "------------------------------- 内存信息 -------------------------------\n"
-        echo "已安装内存详细信息: "
-        sudo lshw -short -C memory | grep GiB || true
-        echo -e "\n------------------------------- 磁盘信息 -------------------------------\n"
-        echo "磁盘数量: $(ls /dev/sd* | grep -v '[1-9]' | wc -l)"
-        echo -e "------------------------------- 磁盘详情 -------------------------------\n"
-        df -Th
+        echo "===== CPU ====="
+        lscpu || true
+        echo "===== Memory ====="
+        free -h
+        echo "===== Disk ====="
+        df -hT
+        echo "===== Workspace ====="
+        pwd
 
-    # 3. Install dependencies
+    # 3. 极限清理系统（给 OpenWrt 让路）
+    - name: Free disk space
+      run: |
+        sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
+        sudo docker image prune --all --force || true
+        sudo apt-get clean
+        df -hT
+
+    # 4. Install build dependencies（精简版，IPQ807x 足够）
     - name: Install build dependencies
       run: |
         sudo apt update
         sudo apt install -y \
           ack antlr3 asciidoc autoconf automake autopoint binutils \
           bison build-essential bzip2 ccache clang cmake cpio curl \
-          device-tree-compiler flex gawk bc gettext git gperf help2man \
+          device-tree-compiler flex gawk gettext git gperf help2man \
           intltool libelf-dev libncurses-dev libssl-dev python3 \
-          python3-distutils rsync unzip wget zlib1g-dev zstd lshw
+          python3-distutils rsync unzip wget zlib1g-dev zstd
         sudo timedatectl set-timezone "$TZ"
 
-    # 4. Clone ImmortalWrt (your branch)
+    # 5. 准备 /mnt 工作目录
+    - name: Prepare /mnt workspace
+      run: |
+        sudo mkdir -p /mnt/openwrt
+        sudo chown $USER:$GROUPS /mnt/openwrt
+        df -hT /mnt
+
+    # 6. Clone ImmortalWrt（你的仓库 + 分支）
     - name: Clone ImmortalWrt
+      working-directory: /mnt
       run: |
         git clone https://github.com/Jim78778/immortalwrt-ipq.git openwrt
         cd openwrt
         git checkout Jim78778-patch-1
         ./scripts/getver.sh
 
-    # 5. Verify device exists
+    # 7. Verify device & DTS（硬校验）
     - name: Verify S10 device
+      working-directory: /mnt/openwrt
       run: |
-        cd openwrt
         grep -R "Device/swaiot_cpe_s10" target/linux/qualcommax/image || exit 1
         test -f target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/ipq8071-s10.dts
 
-    # 6. Add QModem feed
+    # 8. Add QModem feed
     - name: Add QModem feed
+      working-directory: /mnt/openwrt
       run: |
-        cd openwrt
         echo 'src-git qmodem https://github.com/FUjr/QModem.git;main' >> feeds.conf.default
 
-    # 7. Update feeds
+    # 9. Update & install feeds
     - name: Update feeds
+      working-directory: /mnt/openwrt
       run: |
-        cd openwrt
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
-    # 8. Patch QModem Makefiles（可选，彻底消除 quectel-CM 旧依赖警告）
-    - name: Patch QModem Makefiles
-      run: |
-        cd openwrt
-        find package/feeds/qmodem -type f -name 'Makefile' -exec sed -i 's/quectel-CM-5G/quectel_CM_5G_M/g' {} +
-
-    # 9. Apply ci.config
+    # 10. Apply ci.config
     - name: Apply ci.config
+      working-directory: /mnt/openwrt
       run: |
-        cd openwrt
-        cat ../ci.config > .config
+        cat $GITHUB_WORKSPACE/ci.config >> .config
 
-    # 10. Force S10 target
-    - name: Force S10 target
+    # 11. Force S10 target（避免 config 漂移）
+    - name: Force target
+      working-directory: /mnt/openwrt
       run: |
-        cd openwrt
-        sed -i '/DEVICE_swaiot_cpe_s10/d' .config
+        sed -i '/^CONFIG_TARGET_/d' .config
         cat >> .config << 'EOF'
         CONFIG_TARGET_qualcommax=y
         CONFIG_TARGET_qualcommax_ipq807x=y
         CONFIG_TARGET_qualcommax_ipq807x_DEVICE_swaiot_cpe_s10=y
         EOF
 
-    # 11. defconfig
-    - name: Make defconfig V=s
+    # 12. defconfig
+    - name: Make defconfig
+      working-directory: /mnt/openwrt
       run: |
-        cd openwrt
         make defconfig
         grep swaiot_cpe_s10 .config || exit 1
 
-    # 12. Download
+    # 13. Download packages（并清理坏包）
     - name: Download packages
+      working-directory: /mnt/openwrt
       run: |
-        cd openwrt
         make download -j$(nproc)
+        find dl -size -1024c -exec rm -f {} \;
 
-    # 13. Build
+    # 14. Build firmware（三段 fallback，保日志）
     - name: Build firmware
+      working-directory: /mnt/openwrt
       run: |
-        cd openwrt
-        make -j$(nproc) || make -j1 V=s
+        df -hT
+        make -j$(nproc) || make -j1 || make -j1 V=s
 
-    # 14. Verify output
+    # 15. Verify output
     - name: Verify firmware
       run: |
-        ls -lh openwrt/bin/targets/qualcommax/ipq807x/
-        ls openwrt/bin/targets/qualcommax/ipq807x/ || exit 1
+        ls -lh /mnt/openwrt/bin/targets/qualcommax/ipq807x || exit 1
+        df -hT
 
-    # 15. Upload
+    # 16. Upload firmware
     - name: Upload firmware
       uses: actions/upload-artifact@v4
       with:
         name: Swaiot-CPE-S10
-        path: openwrt/bin/targets/qualcommax/ipq807x/*
+        path: /mnt/openwrt/bin/targets/qualcommax/ipq807x/*
