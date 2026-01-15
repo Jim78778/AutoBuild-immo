@@ -80,9 +80,9 @@ jobs:
     # 7. Apply ci.config
     - name: Apply ci.config
       run: |
-        cd $OPENWRT_DIR
-        cat ../ci.config >> .config
-
+         cd $OPENWRT_DIR
+         cat $GITHUB_WORKSPACE/ci.config >> .config
+    
     # 8. Force target
     - name: Force S10 target
       run: |
