@@ -47,7 +47,6 @@ jobs:
           zlib1g-dev zstd
         sudo timedatectl set-timezone "$TZ"
 
-        # 清理可能的 host 构建缓存
         rm -rf $OPENWRT_DIR/staging_dir/host
         rm -rf $OPENWRT_DIR/build_dir/hostpkg
 
@@ -64,19 +63,20 @@ jobs:
         cd $OPENWRT_DIR
         ./scripts/getver.sh
 
-    # 7. Fix NSS feed / patch ECM if needed
+    # 7. Fix NSS rmnet symbol (ECM optional)
     - name: Fix NSS rmnet symbol (ECM optional)
-  run: |
-    set -e
-    cd "$OPENWRT_DIR"
+      shell: bash
+      run: |
+        set -e
+        cd "$OPENWRT_DIR"
 
-    ECM_SRC="feeds/nss_packages/qca-nss-ecm/src/ecm_interface.c"
-    SYMBOL="nss_rmnet_rx_get_ifnum"
+        ECM_SRC="feeds/nss_packages/qca-nss-ecm/src/ecm_interface.c"
+        SYMBOL="nss_rmnet_rx_get_ifnum"
 
-    if [ -f "$ECM_SRC" ] && ! grep -q "$SYMBOL" "$ECM_SRC"; then
-      echo "ECM: missing $SYMBOL, applying compatibility patch (non-fatal)"
+        if [ -f "$ECM_SRC" ] && ! grep -q "$SYMBOL" "$ECM_SRC"; then
+          echo "ECM: missing $SYMBOL, applying compatibility patch (non-fatal)"
 
-      cat > /tmp/fix_rmnet_symbol.patch <<'EOF'
+          cat > /tmp/fix_rmnet_symbol.patch <<'EOF'
 --- a/ecm_interface.c
 +++ b/ecm_interface.c
 @@ -1234,7 +1234,13 @@ static int ecm_interface_rmnet_event(struct notifier_block *nb,
@@ -96,10 +96,10 @@ jobs:
      }
 EOF
 
-      patch -p1 -d "$(dirname "$ECM_SRC")" < /tmp/fix_rmnet_symbol.patch || true
-    else
-      echo "ECM: rmnet symbol OK or ECM not present, skipping patch"
-    fi
+          patch -p1 -d "$(dirname "$ECM_SRC")" < /tmp/fix_rmnet_symbol.patch || true
+        else
+          echo "ECM: rmnet symbol OK or ECM not present, skipping patch"
+        fi
 
     # 8. Verify target base
     - name: Verify qualcommax target
@@ -135,14 +135,14 @@ EOF
         sed -i '/^CONFIG_TARGET_/d' .config
         sed -i '/^CONFIG_PACKAGE_qca-nss-ecm/d' .config
         cat >> .config << 'EOF'
-        CONFIG_TARGET_qualcommax=y
-        CONFIG_TARGET_qualcommax_ipq807x=y
-        CONFIG_TARGET_qualcommax_ipq807x_DEVICE_swaiot_cpe_s10=y
-        CONFIG_QCA_NSS_DP=y
-        CONFIG_QCA_NSS_DRV=y
-        CONFIG_DEVEL=y
-        CONFIG_CCACHE=y
-        EOF
+CONFIG_TARGET_qualcommax=y
+CONFIG_TARGET_qualcommax_ipq807x=y
+CONFIG_TARGET_qualcommax_ipq807x_DEVICE_swaiot_cpe_s10=y
+CONFIG_QCA_NSS_DP=y
+CONFIG_QCA_NSS_DRV=y
+CONFIG_DEVEL=y
+CONFIG_CCACHE=y
+EOF
 
     # 13. Make defconfig
     - name: Make defconfig
@@ -150,7 +150,6 @@ EOF
         cd $OPENWRT_DIR
         make defconfig
         grep swaiot_cpe_s10 .config || exit 1
-        echo "NSS相关配置状态:"
         grep -E "NSS|nss|ECM" .config || true
 
     # 14. Download sources
@@ -167,22 +166,18 @@ EOF
         make package/feeds/nss_packages/qca-nss-drv/compile -j$(nproc) V=s
         make package/feeds/nss_packages/qca-nss-dp/compile -j$(nproc) V=s
 
-    # 16. Build NSS ECM (optional,不会挂掉)
+    # 16. Build NSS ECM (optional)
     - name: Build NSS ECM (optional)
       run: |
         cd $OPENWRT_DIR
-        make package/feeds/nss_packages/qca-nss-ecm/compile -j1 V=s 2>&1 | tee /tmp/ecm_build.log || {
-          echo "ECM构建失败，继续构建其他部分..."
-        }
+        make package/feeds/nss_packages/qca-nss-ecm/compile -j1 V=s || \
+          echo "ECM build failed, ignored"
 
     # 17. Build full firmware
     - name: Build full firmware
       run: |
         cd $OPENWRT_DIR
-        make -j$(nproc) V=s 2>&1 | tee /tmp/full_build.log || {
-          echo "尝试单线程构建..."
-          make -j1 V=s 2>&1 | tee /tmp/single_build.log || exit 1
-        }
+        make -j$(nproc) V=s || make -j1 V=s
 
     # 18. Upload firmware artifacts
     - name: Upload firmware
