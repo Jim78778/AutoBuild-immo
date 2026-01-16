@@ -93,15 +93,15 @@ jobs:
           
           # 创建干净的feeds配置
           cat > feeds.conf.default << 'EOF'
-src-git packages https://git.openwrt.org/feed/packages.git;openwrt-24.10
-src-git luci https://git.openwrt.org/feed/luci.git;openwrt-24.10
-src-git routing https://git.openwrt.org/feed/routing.git;openwrt-24.10
-src-git telephony https://git.openwrt.org/feed/telephony.git;openwrt-24.10
-# NSS packages for IPQ807x
-src-git nss_packages https://github.com/openwrt/nss-packages.git;master
-# QModem for 5G support
-src-git qmodem https://github.com/FUjr/QModem.git;main
-EOF
+          src-git packages https://git.openwrt.org/feed/packages.git;openwrt-24.10
+          src-git luci https://git.openwrt.org/feed/luci.git;openwrt-24.10
+          src-git routing https://git.openwrt.org/feed/routing.git;openwrt-24.10
+          src-git telephony https://git.openwrt.org/feed/telephony.git;openwrt-24.10
+          # NSS packages for IPQ807x
+          src-git nss_packages https://github.com/openwrt/nss-packages.git;master
+          # QModem for 5G support
+          src-git qmodem https://github.com/FUjr/QModem.git;main
+          EOF
           
           echo "Feeds配置内容:"
           cat feeds.conf.default
@@ -147,48 +147,48 @@ EOF
           
           # 添加基本配置
           cat >> .config << 'EOF'
-CONFIG_TARGET_qualcommax=y
-CONFIG_TARGET_qualcommax_ipq807x=y
-CONFIG_TARGET_qualcommax_ipq807x_DEVICE_swaiot_cpe_s10=y
-
-# 暂时禁用ECM以避免编译错误
-# CONFIG_PACKAGE_qca-nss-ecm is not set
-
-# NSS驱动
-CONFIG_PACKAGE_qca-nss-drv=y
-CONFIG_PACKAGE_qca-nss-dp=y
-
-# 开发工具
-CONFIG_DEVEL=y
-CONFIG_CCACHE=y
-CONFIG_BUILD_LOG=y
-
-# 调试信息
-CONFIG_KERNEL_DEBUG_INFO=y
-CONFIG_KERNEL_DEBUG_KERNEL=y
-CONFIG_KERNEL_KALLSYMS=y
-CONFIG_KERNEL_DEBUG_FS=y
-CONFIG_STRIP_KERNEL_EXPORTS=n
-
-# 文件系统
-CONFIG_TARGET_ROOTFS_SQUASHFS=y
-CONFIG_TARGET_ROOTFS_EXT4FS=y
-CONFIG_TARGET_ROOTFS_INCLUDE_KERNEL=y
-CONFIG_TARGET_ROOTFS_INCLUDE_DTB=y
-CONFIG_TARGET_ROOTFS_INCLUDE_FIT=y
-
-# 优化设置
-CONFIG_TARGET_OPTIMIZATION="-Os -pipe -mcpu=cortex-a53 -mtune=cortex-a53"
-CONFIG_TARGET_SUFFIX="generic"
-
-# 版本信息
-CONFIG_VERSION_DIST="Swaiot"
-CONFIG_VERSION_NICK="CPE-S10"
-CONFIG_VERSION_NUMBER="1.0"
-CONFIG_VERSION_MANUFACTURER="Swaiot"
-CONFIG_VERSION_PRODUCT="Swaiot CPE-S10"
-CONFIG_VERSION_HWREV="v1.0"
-EOF
+          CONFIG_TARGET_qualcommax=y
+          CONFIG_TARGET_qualcommax_ipq807x=y
+          CONFIG_TARGET_qualcommax_ipq807x_DEVICE_swaiot_cpe_s10=y
+          
+          # 暂时禁用ECM以避免编译错误
+          # CONFIG_PACKAGE_qca-nss-ecm is not set
+          
+          # NSS驱动
+          CONFIG_PACKAGE_qca-nss-drv=y
+          CONFIG_PACKAGE_qca-nss-dp=y
+          
+          # 开发工具
+          CONFIG_DEVEL=y
+          CONFIG_CCACHE=y
+          CONFIG_BUILD_LOG=y
+          
+          # 调试信息
+          CONFIG_KERNEL_DEBUG_INFO=y
+          CONFIG_KERNEL_DEBUG_KERNEL=y
+          CONFIG_KERNEL_KALLSYMS=y
+          CONFIG_KERNEL_DEBUG_FS=y
+          CONFIG_STRIP_KERNEL_EXPORTS=n
+          
+          # 文件系统
+          CONFIG_TARGET_ROOTFS_SQUASHFS=y
+          CONFIG_TARGET_ROOTFS_EXT4FS=y
+          CONFIG_TARGET_ROOTFS_INCLUDE_KERNEL=y
+          CONFIG_TARGET_ROOTFS_INCLUDE_DTB=y
+          CONFIG_TARGET_ROOTFS_INCLUDE_FIT=y
+          
+          # 优化设置
+          CONFIG_TARGET_OPTIMIZATION="-Os -pipe -mcpu=cortex-a53 -mtune=cortex-a53"
+          CONFIG_TARGET_SUFFIX="generic"
+          
+          # 版本信息
+          CONFIG_VERSION_DIST="Swaiot"
+          CONFIG_VERSION_NICK="CPE-S10"
+          CONFIG_VERSION_NUMBER="1.0"
+          CONFIG_VERSION_MANUFACTURER="Swaiot"
+          CONFIG_VERSION_PRODUCT="Swaiot CPE-S10"
+          CONFIG_VERSION_HWREV="v1.0"
+          EOF
           
           echo "设备配置完成"
 
