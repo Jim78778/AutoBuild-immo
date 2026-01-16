@@ -14,8 +14,9 @@
 #sed -i 's/^#\(.*helloworld\)/\1/' feeds.conf.default
 
 # Add a feed source
-echo 'src-git helloworld https://github.com/fw876/helloworld' >>feeds.conf.default
+#echo 'src-git helloworld https://github.com/fw876/helloworld' >>feeds.conf.default
 #echo 'src-git passwall https://github.com/xiaorouji/openwrt-passwall' >>feeds.conf.default
+
 # 跳过 mx4200 DTS，避免 patch 失败
 sed -i '/ipq8174-mx4200.dtsi/d' \
 target/linux/qualcommax/patches-6.6/*.patch
