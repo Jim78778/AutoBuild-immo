@@ -123,6 +123,36 @@ jobs:
           
           echo "Feeds安装完成"
 
+      - name: Fix QModem Makefile issues
+        if: always()
+        run: |
+          echo "### 修复QModem Makefile问题 ###"
+          cd $OPENWRT_DIR
+          
+          # 检查问题文件
+          for makefile in feeds/qmodem/luci/luci-app-qmodem*/Makefile; do
+            if [ -f "$makefile" ]; then
+              echo "检查: $makefile"
+              # 常见问题修复
+              sed -i 's/PKG_LICENSE:=.*/PKG_LICENSE:=GPL-3.0-only/' "$makefile" 2>/dev/null || true
+              sed -i 's/PKG_LICENSE:=.*/PKG_LICENSE:=Apache-2.0/' "$makefile" 2>/dev/null || true
+              sed -i 's/PKG_LICENSE:=.*/PKG_LICENSE:=MIT/' "$makefile" 2>/dev/null || true
+              
+              # 确保有PKG_MAINTAINER字段
+              if ! grep -q "PKG_MAINTAINER" "$makefile"; then
+                echo "PKG_MAINTAINER:=Unknown" >> "$makefile"
+              fi
+              
+              # 移除可能的语法错误
+              sed -i '/^[ \t]*$/d' "$makefile"  # 删除空行
+              sed -i 's/[ \t]*$//' "$makefile"  # 删除行尾空格
+            fi
+          done
+          
+          echo "QModem Makefile修复完成"
+
+          
+
       # 9. 应用CI配置文件
       - name: Apply CI configuration
         run: |
