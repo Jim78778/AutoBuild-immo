@@ -87,13 +87,21 @@ jobs:
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
-    # 7.5
+    # 7.5 Remove invalid rmnet patch (WWAN branch already handled)
     - name: Remove invalid NSS rmnet disable patch
       run: |
         cd $OPENWRT_DIR
         rm -f target/linux/qualcommax/patches-6.6/0602-qca-nss-ecm-disable-rmnet-kconfig.patch
 
-    
+    # 7.6 FORCE disable ECM RAWIP (critical for PCIe WWAN)
+    - name: Disable ECM RAWIP (rmnet)
+      run: |
+        cd $OPENWRT_DIR
+        sed -i \
+          -e 's/ECM_INTERFACE_RAWIP_ENABLE=y/ECM_INTERFACE_RAWIP_ENABLE=n/' \
+          feeds/nss_packages/qca-nss-ecm/Makefile
+        grep ECM_INTERFACE_RAWIP_ENABLE feeds/nss_packages/qca-nss-ecm/Makefile || true
+
     # 8. Generate minimal .config (CPE-S10 + PCIe WWAN + minimal NSS)
     - name: Generate .config
       run: |
