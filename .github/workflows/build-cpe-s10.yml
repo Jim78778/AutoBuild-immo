@@ -87,6 +87,13 @@ jobs:
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
+    # 7.5
+    - name: Remove invalid NSS rmnet disable patch
+      run: |
+        cd $OPENWRT_DIR
+        rm -f target/linux/qualcommax/patches-6.6/0602-qca-nss-ecm-disable-rmnet-kconfig.patch
+
+    
     # 8. Generate minimal .config (CPE-S10 + PCIe WWAN + minimal NSS)
     - name: Generate .config
       run: |
