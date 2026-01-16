@@ -65,51 +65,41 @@ jobs:
         ./scripts/getver.sh
 
     # 7. Fix NSS feed / patch ECM if needed
-    - name: Fix NSS dependencies and patch ECM
+    - name: Fix NSS rmnet symbol (ECM optional)
   run: |
-    cd $OPENWRT_DIR
+    set -e
+    cd "$OPENWRT_DIR"
 
-    echo "Fixing nss_packages feed..."
-
-    # 1️⃣ 清理并替换 nss_packages feed（防止重复）
-    cp feeds.conf.default feeds.conf.default.backup || true
-    sed -i '/^src-git nss_packages/d' feeds.conf.default
-    echo 'src-git nss_packages https://github.com/openwrt/nss-packages.git;master' >> feeds.conf.default
-
-    # 2️⃣ 更新 feeds
-    ./scripts/feeds update nss_packages
-    ./scripts/feeds install -a -p nss_packages -f
-
-    # 3️⃣ 如果缺失 rmnet 符号，给 ECM 打兜底 patch
+    ECM_SRC="feeds/nss_packages/qca-nss-ecm/src/ecm_interface.c"
     SYMBOL="nss_rmnet_rx_get_ifnum"
-    if ! grep -rq "$SYMBOL" feeds/nss_packages/qca-nss-drv; then
-      echo "WARNING: $SYMBOL not found, patching ECM..."
 
-      cat > /tmp/fix_rmnet_symbol.patch << 'EOF'
+    if [ -f "$ECM_SRC" ] && ! grep -q "$SYMBOL" "$ECM_SRC"; then
+      echo "ECM: missing $SYMBOL, applying compatibility patch (non-fatal)"
+
+      cat > /tmp/fix_rmnet_symbol.patch <<'EOF'
 --- a/ecm_interface.c
 +++ b/ecm_interface.c
 @@ -1234,7 +1234,13 @@ static int ecm_interface_rmnet_event(struct notifier_block *nb,
- #ifdef ECM_INTERFACE_RMNET_ENABLE
  static int ecm_interface_rmnet_rx_event(struct sk_buff *skb, struct net_device *dev)
  {
+ #ifdef ECM_INTERFACE_RMNET_ENABLE
+-    int ifnum = nss_rmnet_rx_get_ifnum(skb);
 +#if defined(nss_rmnet_rx_get_interface_number)
 +    int ifnum = nss_rmnet_rx_get_interface_number(skb);
 +#elif defined(nss_rmnet_rx_get_ifnum)
-     int ifnum = nss_rmnet_rx_get_ifnum(skb);
++    int ifnum = nss_rmnet_rx_get_ifnum(skb);
 +#else
 +    return NOTIFY_DONE;
 +#endif
-
      if (ifnum < 0) {
          return NOTIFY_DONE;
+     }
 EOF
 
-      if [ -f feeds/nss_packages/qca-nss-ecm/src/ecm_interface.c ]; then
-        patch -p1 -d feeds/nss_packages/qca-nss-ecm/src < /tmp/fix_rmnet_symbol.patch || true
-      fi
+      patch -p1 -d "$(dirname "$ECM_SRC")" < /tmp/fix_rmnet_symbol.patch || true
+    else
+      echo "ECM: rmnet symbol OK or ECM not present, skipping patch"
     fi
-
-
 
     # 8. Verify target base
     - name: Verify qualcommax target
