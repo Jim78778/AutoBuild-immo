@@ -1,334 +1,126 @@
-name: Build Swaiot CPE-S10 OpenWrt Firmware
+name: Build Swaiot CPE-S10 (ipq807x NSS)
 
 on:
-  workflow_dispatch:  # 手动触发
+  workflow_dispatch:
   push:
     branches:
-      - swaiot-s10    # 推送到该分支时自动触发
-    paths-ignore:     # 忽略这些文件的变更
-      - 'README.md'
-      - 'LICENSE'
-      - '.gitignore'
-      - 'docs/**'
+      - swaiot-s10
 
 env:
   TZ: Asia/Shanghai
+  REPO_URL: https://github.com/qosmio/openwrt-ipq.git
+  REPO_BRANCH: 24.10-nss
+  CONFIG_FILE: ci.config
+  FEEDS_CONF: feeds.conf.default
+  UPLOAD_FIRMWARE: true
   OPENWRT_DIR: /mnt/openwrt
-  BUILD_THREADS: ${{ github.event.repository.private && '2' || '$(nproc)' }}
 
 jobs:
-  build-firmware:
-    name: Build OpenWrt Firmware
+  build:
     runs-on: ubuntu-22.04
-    timeout-minutes: 180  # 3小时超时
 
     steps:
-      # 1. 检出配置文件仓库
-      - name: Checkout configuration repository
-        uses: actions/checkout@v4
-        with:
-          path: config-repo
+    # ===============================
+    # 1. Checkout workflow repo
+    # ===============================
+    - name: Checkout workflow repo
+      uses: actions/checkout@v4
 
-      # 2. 系统信息和资源检查
-      - name: Check system resources
-        run: |
-          echo "### 系统资源信息 ###"
-          echo "CPU 核心数: $(nproc)"
-          lscpu | grep -E 'Model name|Architecture|CPU\(s\)'
-          echo "内存总量: $(free -h | awk '/^Mem:/{print $2}')"
-          echo "可用磁盘空间:"
-          df -h / /mnt 2>/dev/null || df -h /
+    # ===============================
+    # 2. Set timezone
+    # ===============================
+    - name: Set timezone
+      run: sudo timedatectl set-timezone "$TZ"
 
-      # 3. 环境清理
-      - name: Cleanup build environment
-        run: |
-          echo "### 清理构建环境 ###"
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
-          sudo docker system prune -af || true
-          sudo apt-get clean
-          echo "清理完成"
+    # ===============================
+    # 3. Free disk space (important)
+    # ===============================
+    - name: Free disk space
+      run: |
+        sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
+        sudo apt-get clean
 
-      # 4. 安装构建依赖
-      - name: Install build dependencies
-        run: |
-          echo "### 安装构建依赖包 ###"
-          sudo apt-get update -y
-          sudo apt-get install -y \
-            ack antlr3 asciidoc autoconf automake autopoint binutils \
-            bison build-essential bzip2 ccache clang cmake cpio curl \
-            device-tree-compiler diffutils flex gawk gettext git gperf \
-            help2man intltool libelf-dev libncurses-dev libssl-dev \
-            libtool libtool-bin lrzsz lzma-dev m4 make ncurses-dev \
-            p7zip-full patch perl pkg-config python3 python3-dev \
-            python3-distutils python3-pip python3-setuptools rsync \
-            scons sharutils sqlite3 subversion swig texinfo tree \
-            u-boot-tools unzip vim wget xmlto xxd zlib1g-dev zstd
+    # ===============================
+    # 4. Install build dependencies
+    # ===============================
+    - name: Install build dependencies
+      run: |
+        sudo apt update
+        sudo apt install -y \
+          ack antlr3 asciidoc autoconf automake autopoint binutils bison \
+          build-essential bzip2 ccache clang cmake cpio curl \
+          device-tree-compiler ecj fastjar flex gawk gettext \
+          gcc-multilib g++-multilib git gperf haveged help2man \
+          intltool lib32gcc-s1 libc6-dev-i386 libelf-dev \
+          libglib2.0-dev libgmp3-dev libltdl-dev libmpc-dev \
+          libmpfr-dev libncurses5-dev libncursesw5-dev \
+          libreadline-dev libssl-dev libtool lld lrzsz \
+          mkisofs msmtp nano ninja-build p7zip p7zip-full \
+          patch pkgconf python3 python3-pip python3-ply \
+          python3-docutils qemu-utils re2c rsync scons \
+          squashfs-tools subversion swig texinfo uglifyjs \
+          upx-ucl unzip vim wget xmlto xxd zlib1g-dev
 
-      # 5. 创建工作空间
-      - name: Setup workspace
-        run: |
-          echo "### 设置工作空间 ###"
-          sudo mkdir -p /mnt
-          sudo chown -R $USER:$USER /mnt
-          echo "工作空间已准备: /mnt"
+    # ===============================
+    # 5. Clone openwrt-ipq source
+    # ===============================
+    - name: Clone openwrt-ipq
+      run: |
+        git clone --depth=1 -b $REPO_BRANCH $REPO_URL $OPENWRT_DIR
+        cd $OPENWRT_DIR
 
-      # 6. 克隆OpenWrt源码
-      - name: Clone OpenWrt source code
-        run: |
-          echo "### 克隆OpenWrt源码 ###"
-          git clone \
-            --depth=1 \
-            --branch swaiot-s10 \
-            https://github.com/Jim78778/openwrt-ipq.git \
-            $OPENWRT_DIR
-          
-          cd $OPENWRT_DIR
-          echo "OpenWrt版本: $(./scripts/getver.sh || echo 'unknown')"
+    # ===============================
+    # 6. Prepare feeds
+    # ===============================
+    - name: Update & install feeds
+      run: |
+        cd $OPENWRT_DIR
+        ./scripts/feeds update -a
+        ./scripts/feeds install -a
 
-      # 7. 配置feeds源
-      - name: Configure package feeds
-        run: |
-          echo "### 配置软件包源 ###"
-          cd $OPENWRT_DIR
-          
-          # 创建干净的feeds配置
-          cat > feeds.conf.default << 'EOF'
-          src-git packages https://git.openwrt.org/feed/packages.git;openwrt-24.10
-          src-git luci https://git.openwrt.org/feed/luci.git;openwrt-24.10
-          src-git routing https://git.openwrt.org/feed/routing.git;openwrt-24.10
-          src-git telephony https://git.openwrt.org/feed/telephony.git;openwrt-24.10
-          # NSS packages for IPQ807x
-          src-git nss_packages https://github.com/openwrt/nss-packages.git;master
-          # QModem for 5G support
-          src-git qmodem https://github.com/FUjr/QModem.git;main
-          EOF
-          
-          echo "Feeds配置内容:"
-          cat feeds.conf.default
+    # ===============================
+    # 7. Fix QModem dependencies
+    # ===============================
+    - name: Fix QModem dependency issues
+      run: |
+        cd $OPENWRT_DIR
+        sed -i \
+          -e 's/kmod-mhi-wwan/kmod-usb-net-qmi-wwan/g' \
+          -e 's/quectel-CM-5G//g' \
+          -e 's/quectel-cm//g' \
+          package/feeds/qmodem/qmodem/Makefile
 
-      # 8. 更新和安装feeds
-      - name: Update and install feeds
-        run: |
-          echo "### 更新并安装软件包源 ###"
-          cd $OPENWRT_DIR
-          
-          # 清理旧的feeds
-          rm -rf feeds
-          
-          # 更新所有feeds
-          ./scripts/feeds update -a
-          
-          # 安装所有feeds
-          ./scripts/feeds install -a
-          
-          echo "Feeds安装完成"
+    # ===============================
+    # 8. Apply ci.config
+    # ===============================
+    - name: Load ci.config
+      run: |
+        cd $OPENWRT_DIR
+        cp ../$CONFIG_FILE .config
+        make defconfig
 
-      - name: Fix QModem Makefile issues
-        if: always()
-        run: |
-          echo "### 修复QModem Makefile问题 ###"
-          cd $OPENWRT_DIR
-          
-          # 检查问题文件
-          for makefile in feeds/qmodem/luci/luci-app-qmodem*/Makefile; do
-            if [ -f "$makefile" ]; then
-              echo "检查: $makefile"
-              # 常见问题修复
-              sed -i 's/PKG_LICENSE:=.*/PKG_LICENSE:=GPL-3.0-only/' "$makefile" 2>/dev/null || true
-              sed -i 's/PKG_LICENSE:=.*/PKG_LICENSE:=Apache-2.0/' "$makefile" 2>/dev/null || true
-              sed -i 's/PKG_LICENSE:=.*/PKG_LICENSE:=MIT/' "$makefile" 2>/dev/null || true
-              
-              # 确保有PKG_MAINTAINER字段
-              if ! grep -q "PKG_MAINTAINER" "$makefile"; then
-                echo "PKG_MAINTAINER:=Unknown" >> "$makefile"
-              fi
-              
-              # 移除可能的语法错误
-              sed -i '/^[ \t]*$/d' "$makefile"  # 删除空行
-              sed -i 's/[ \t]*$//' "$makefile"  # 删除行尾空格
-            fi
-          done
-          
-          echo "QModem Makefile修复完成"
+    # ===============================
+    # 9. Download sources
+    # ===============================
+    - name: Download packages
+      run: |
+        cd $OPENWRT_DIR
+        make download -j$(nproc) V=s
 
-          
+    # ===============================
+    # 10. Build firmware
+    # ===============================
+    - name: Build firmware
+      run: |
+        cd $OPENWRT_DIR
+        make -j$(nproc) V=s
 
-      # 9. 应用CI配置文件
-      - name: Apply CI configuration
-        run: |
-          echo "### 应用CI配置文件 ###"
-          cd $OPENWRT_DIR
-          
-          if [ -f "$GITHUB_WORKSPACE/config-repo/ci.config" ]; then
-            echo "找到ci.config，正在应用..."
-            cat "$GITHUB_WORKSPACE/config-repo/ci.config" >> .config
-          else
-            echo "警告: 未找到ci.config文件"
-          fi
-
-      # 10. 配置目标设备
-      - name: Configure target device
-        run: |
-          echo "### 配置目标设备 ###"
-          cd $OPENWRT_DIR
-          
-          # 清理旧配置
-          > .config
-          
-          # 添加基本配置
-          cat >> .config << 'EOF'
-          CONFIG_TARGET_qualcommax=y
-          CONFIG_TARGET_qualcommax_ipq807x=y
-          CONFIG_TARGET_qualcommax_ipq807x_DEVICE_swaiot_cpe_s10=y
-          
-          # 暂时禁用ECM以避免编译错误
-          # CONFIG_PACKAGE_qca-nss-ecm is not set
-          
-          # NSS驱动
-          CONFIG_PACKAGE_qca-nss-drv=y
-          CONFIG_PACKAGE_qca-nss-dp=y
-          
-          # 开发工具
-          CONFIG_DEVEL=y
-          CONFIG_CCACHE=y
-          CONFIG_BUILD_LOG=y
-          
-          # 调试信息
-          CONFIG_KERNEL_DEBUG_INFO=y
-          CONFIG_KERNEL_DEBUG_KERNEL=y
-          CONFIG_KERNEL_KALLSYMS=y
-          CONFIG_KERNEL_DEBUG_FS=y
-          CONFIG_STRIP_KERNEL_EXPORTS=n
-          
-          # 文件系统
-          CONFIG_TARGET_ROOTFS_SQUASHFS=y
-          CONFIG_TARGET_ROOTFS_EXT4FS=y
-          CONFIG_TARGET_ROOTFS_INCLUDE_KERNEL=y
-          CONFIG_TARGET_ROOTFS_INCLUDE_DTB=y
-          CONFIG_TARGET_ROOTFS_INCLUDE_FIT=y
-          
-          # 优化设置
-          CONFIG_TARGET_OPTIMIZATION="-Os -pipe -mcpu=cortex-a53 -mtune=cortex-a53"
-          CONFIG_TARGET_SUFFIX="generic"
-          
-          # 版本信息
-          CONFIG_VERSION_DIST="Swaiot"
-          CONFIG_VERSION_NICK="CPE-S10"
-          CONFIG_VERSION_NUMBER="1.0"
-          CONFIG_VERSION_MANUFACTURER="Swaiot"
-          CONFIG_VERSION_PRODUCT="Swaiot CPE-S10"
-          CONFIG_VERSION_HWREV="v1.0"
-          EOF
-          
-          echo "设备配置完成"
-
-      # 11. 生成默认配置
-      - name: Generate default configuration
-        run: |
-          echo "### 生成默认配置 ###"
-          cd $OPENWRT_DIR
-          
-          make defconfig
-          
-          echo "配置摘要:"
-          echo "目标设备: $(grep 'CONFIG_TARGET_qualcommax_ipq807x_DEVICE_' .config | cut -d= -f2)"
-          echo "NSS驱动: $(grep 'CONFIG_PACKAGE_qca-nss' .config | wc -l) 个包"
-          echo "总配置项: $(wc -l < .config)"
-
-      # 12. 下载软件包源码
-      - name: Download package sources
-        run: |
-          echo "### 下载软件包源码 ###"
-          cd $OPENWRT_DIR
-          
-          # 并行下载
-          make download -j$(nproc)
-          
-          # 清理无效的下载文件
-          find dl -name "*.tmp" -delete 2>/dev/null || true
-          find dl -size -1k -delete 2>/dev/null || true
-          
-          echo "下载完成，文件总数: $(find dl -type f | wc -l)"
-
-      # 13. 编译固件
-      - name: Compile firmware
-        run: |
-          echo "### 开始编译固件 ###"
-          cd $OPENWRT_DIR
-          
-          # 设置构建日志
-          LOG_FILE="build_$(date +%Y%m%d_%H%M%S).log"
-          
-          # 使用多线程构建，失败时降级
-          echo "使用 $BUILD_THREADS 线程进行构建..."
-          
-          if make -j$BUILD_THREADS V=s 2>&1 | tee $LOG_FILE; then
-            echo "✅ 构建成功完成"
-          else
-            echo "⚠️  多线程构建失败，尝试单线程构建..."
-            if make -j1 V=s 2>&1 | tee build_single.log; then
-              echo "✅ 单线程构建成功"
-            else
-              echo "❌ 构建失败"
-              echo "最后50行错误日志:"
-              tail -50 $LOG_FILE || tail -50 build_single.log
-              exit 1
-            fi
-          fi
-
-      # 14. 验证构建结果
-      - name: Verify build artifacts
-        run: |
-          echo "### 验证构建结果 ###"
-          cd $OPENWRT_DIR
-          
-          if [ -d "bin/targets/qualcommax/ipq807x" ]; then
-            echo "✅ 固件生成成功"
-            echo "生成的文件:"
-            find bin/targets/qualcommax/ipq807x -type f \( \
-              -name "*.bin" -o \
-              -name "*.img" -o \
-              -name "*.gz" -o \
-              -name "*.rootfs" -o \
-              -name "*.dtb" \
-            \) -printf "  %p (%s bytes)\n"
-            
-            # 计算总大小
-            TOTAL_SIZE=$(find bin/targets/qualcommax/ipq807x -type f -exec stat -c%s {} + | awk '{sum+=$1} END {print sum}')
-            echo "总大小: $(numfmt --to=iec $TOTAL_SIZE)"
-          else
-            echo "❌ 固件目录不存在"
-            exit 1
-          fi
-
-      # 15. 上传固件文件
-      - name: Upload firmware artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: swaiot-cpe-s10-firmware
-          path: ${{ env.OPENWRT_DIR }}/bin/targets/qualcommax/ipq807x/*
-          retention-days: 30
-          if-no-files-found: error
-          compression-level: 9
-
-      # 16. 上传构建日志（可选）
-      - name: Upload build logs
-        if: always()  # 即使失败也上传日志
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-logs
-          path: |
-            ${{ env.OPENWRT_DIR }}/build_*.log
-            ${{ env.OPENWRT_DIR }}/build_single.log
-          retention-days: 7
-
-      # 17. 构建完成通知（可选）
-      - name: Build status notification
-        if: always()
-        run: |
-          echo "### 构建完成 ###"
-          echo "状态: ${{ job.status }}"
-          echo "作业ID: ${{ github.run_id }}"
-          echo "提交: ${{ github.sha }}"
-          echo "触发者: ${{ github.actor }}"
-          echo "时间: $(date)"
+    # ===============================
+    # 11. Upload firmware
+    # ===============================
+    - name: Upload firmware
+      if: env.UPLOAD_FIRMWARE == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: Swaiot-CPE-S10-ipq807x-NSS
+        path: $OPENWRT_DIR/bin/targets/qualcommax/ipq807x/
