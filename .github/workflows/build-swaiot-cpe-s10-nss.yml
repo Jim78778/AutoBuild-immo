@@ -33,7 +33,7 @@ jobs:
       run: sudo timedatectl set-timezone "$TZ"
 
     # ===============================
-    # 3. Free disk space (important)
+    # 3. Free disk space
     # ===============================
     - name: Free disk space
       run: |
@@ -62,7 +62,7 @@ jobs:
           upx-ucl unzip vim wget xmlto xxd zlib1g-dev
 
     # ===============================
-    # 5. Clone openwrt-ipq source
+    # 5. Clone OpenWrt source
     # ===============================
     - name: Clone openwrt-ipq
       run: |
@@ -75,7 +75,6 @@ jobs:
     - name: Update & install feeds
       run: |
         cd $OPENWRT_DIR
-        # 只有当 feeds.conf.default 和 FEEDS_CONF 不同才拷贝
         if [ "$FEEDS_CONF" != "feeds.conf.default" ]; then
           cp $FEEDS_CONF feeds.conf.default
         fi
@@ -83,16 +82,12 @@ jobs:
         ./scripts/feeds install -a
 
     # ===============================
-    # 7. Fix QModem dependencies
+    # 7. Add custom packages (QModem)
     # ===============================
-    - name: Fix QModem dependency issues
+    - name: Add custom packages
       run: |
-        cd $OPENWRT_DIR
-        sed -i \
-          -e 's/kmod-mhi-wwan/kmod-usb-net-qmi-wwan/g' \
-          -e 's/quectel-CM-5G//g' \
-          -e 's/quectel-cm//g' \
-          package/feeds/qmodem/qmodem/Makefile
+        cd $GITHUB_WORKSPACE
+        bash diy-part1.sh
 
     # ===============================
     # 8. Apply ci.config
