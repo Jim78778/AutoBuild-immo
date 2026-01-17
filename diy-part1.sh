@@ -1,26 +1,31 @@
 #!/bin/bash
-#
-# https://github.com/P3TERX/Actions-OpenWrt
-# File name: diy-part1.sh
-# Description: OpenWrt DIY script part 1 (Before Update feeds)
-#
-# Copyright (c) 2019-2024 P3TERX <https://p3terx.com>
-#
-# This is free software, licensed under the MIT License.
-# See /LICENSE for more information.
-#
-#./scripts/feeds update -a && rm -rf feeds/luci/applications/luci-app-mosdns && rm -rf feeds/packages/net/{alist,adguardhome,mosdns,smartdns}
-#rm -rf feeds/packages/lang/golang
-#git clone https://github.com/kenzok8/golang feeds/packages/lang/golang
+# diy-part1.sh — 在 openwrt 构建前准备
 
-# Uncomment a feed source
-#sed -i 's/^#\(.*helloworld\)/\1/' feeds.conf.default
+# 假设 OPENWRT_DIR 已经定义
+OPENWRT_DIR="${OPENWRT_DIR:-$PWD/openwrt}"
 
-# Add a feed source
-#echo 'src-git qmodem https://github.com/FUjr/QModem.git;main' >> feeds.conf.default
-#./scripts/feeds update qmodem
-#./scripts/feeds install -a -p qmodem
-#echo 'src-git passwall https://github.com/xiaorouji/openwrt-passwall' >>feeds.conf.default
-# 跳过 mx4200 DTS，避免 patch 失败
-#sed -i '/ipq8174-mx4200.dtsi/d' \
-#target/linux/qualcommax/patches-6.6/*.patch
+echo "== Copying custom packages =="
+
+# 创建 diypath 目录
+mkdir -p "$OPENWRT_DIR/package/diypath"
+
+# 假设 QModem 仓库在仓库子目录 custom-feed/qmodem
+# 如果你是用 git clone 拉取，可以用下面方式：
+if [ ! -d "$OPENWRT_DIR/package/diypath/qmodem" ]; then
+    echo "Cloning QModem into diypath..."
+    git clone --depth=1 -b main https://github.com/FUjr/QModem.git "$OPENWRT_DIR/package/diypath/qmodem"
+fi
+
+# 修正 QModem Makefile 依赖
+echo "Fixing QModem Makefile dependencies..."
+sed -i \
+  -e 's/kmod-mhi-wwan/kmod-usb-net-qmi-wwan/g' \
+  -e 's/quectel-CM-5G//g' \
+  -e 's/quectel-cm//g' \
+  "$OPENWRT_DIR/package/diypath/qmodem/Makefile"
+
+# 可选：在 feeds 安装后，确保 diypath 被包含
+echo "Configuring .config for QModem..."
+cd "$OPENWRT_DIR"
+# 如果 ci.config 已经包含 QModem，可以直接 make defconfig
+make defconfig
