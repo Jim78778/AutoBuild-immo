@@ -33,7 +33,7 @@ jobs:
       run: sudo timedatectl set-timezone "$TZ"
 
     # ===============================
-    # 3. Free disk space (important)
+    # 3. Free disk space (optional)
     # ===============================
     - name: Free disk space
       run: |
@@ -62,12 +62,11 @@ jobs:
           upx-ucl unzip vim wget xmlto xxd zlib1g-dev
 
     # ===============================
-    # 5. Clone openwrt-ipq source
+    # 5. Clone OpenWrt source
     # ===============================
     - name: Clone openwrt-ipq
       run: |
         git clone --depth=1 -b $REPO_BRANCH $REPO_URL $OPENWRT_DIR
-        cd $OPENWRT_DIR
 
     # ===============================
     # 6. Prepare feeds
@@ -75,32 +74,29 @@ jobs:
     - name: Update & install feeds
       run: |
         cd $OPENWRT_DIR
-        # 只有当 feeds.conf.default 和 FEEDS_CONF 不同才拷贝
+        # 如果 FEEDS_CONF 不同才拷贝
         if [ "$FEEDS_CONF" != "feeds.conf.default" ]; then
-          cp $FEEDS_CONF feeds.conf.default
+          cp $GITHUB_WORKSPACE/$FEEDS_CONF feeds.conf.default
         fi
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
     # ===============================
-    # 7. Fix QModem dependencies
+    # 7. Apply diy-part1.sh (QModem, AdGuardHome, theme)
     # ===============================
-    - name: Fix QModem dependency issues
+    - name: Apply custom DIY packages
       run: |
         cd $OPENWRT_DIR
-        sed -i \
-          -e 's/kmod-mhi-wwan/kmod-usb-net-qmi-wwan/g' \
-          -e 's/quectel-CM-5G//g' \
-          -e 's/quectel-cm//g' \
-          package/feeds/qmodem/qmodem/Makefile
+        chmod +x $GITHUB_WORKSPACE/diy-part1.sh
+        $GITHUB_WORKSPACE/diy-part1.sh
 
     # ===============================
-    # 8. Apply ci.config
+    # 8. Load ci.config
     # ===============================
     - name: Load ci.config
       run: |
         cd $OPENWRT_DIR
-        cp ../$CONFIG_FILE .config
+        cp $GITHUB_WORKSPACE/$CONFIG_FILE .config
         make defconfig
 
     # ===============================
