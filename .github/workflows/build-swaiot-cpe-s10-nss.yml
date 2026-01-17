@@ -13,7 +13,7 @@ env:
   CONFIG_FILE: ci.config
   FEEDS_CONF: feeds.conf.default
   UPLOAD_FIRMWARE: true
-  OPENWRT_DIR: /mnt/openwrt
+  OPENWRT_DIR: /home/runner/work/openwrt-build
 
 jobs:
   build:
@@ -75,6 +75,10 @@ jobs:
     - name: Update & install feeds
       run: |
         cd $OPENWRT_DIR
+        # 只有当 feeds.conf.default 和 FEEDS_CONF 不同才拷贝
+        if [ "$FEEDS_CONF" != "feeds.conf.default" ]; then
+          cp $FEEDS_CONF feeds.conf.default
+        fi
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
