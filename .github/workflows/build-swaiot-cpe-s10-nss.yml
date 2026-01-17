@@ -123,4 +123,4 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: Swaiot-CPE-S10-ipq807x-NSS
-        path: $OPENWRT_DIR/bin/targets/qualcommax/ipq807x/
+        path: ${{ env.OPENWRT_DIR }}/bin/targets/qualcommax/ipq807x/
