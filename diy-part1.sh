@@ -10,6 +10,10 @@ echo "=== Step 1: Add QModem ==="
 # 使用 fork 的 QModem 仓库
 git clone --depth=1 https://github.com/FUjr/QModem.git $DIYPATH/qmodem
 
+#修复jq/host
+sed -i '/jq\/host/d' \
+  package/feeds/luci/luci-app-advanced-reboot/Makefile
+
 # 修复 QModem Makefile 中不必要的依赖，适配 PCIe
 sed -i \
   -e 's/kmod-usb-net-qmi-wwan-ctrl/kmod-mhi-wwan-ctrl/g' \
