@@ -8,12 +8,12 @@ on:
 
 env:
   TZ: Asia/Shanghai
-  REPO_URL: https://github.com/qosmio/openwrt-ipq.git
-  REPO_BRANCH: 24.10-nss
+  REPO_URL: https://github.com/Jim78778/openwrt-ipq.git
+  REPO_BRANCH: swaiot-s10
   CONFIG_FILE: ci.config
-  FEEDS_CONF: feeds.conf.default
+  DIY_SCRIPT: diy-part1.sh
   UPLOAD_FIRMWARE: true
-  OPENWRT_DIR: /home/runner/work/openwrt-build
+  OPENWRT_DIR: /mnt/openwrt-build
 
 jobs:
   build:
@@ -33,7 +33,7 @@ jobs:
       run: sudo timedatectl set-timezone "$TZ"
 
     # ===============================
-    # 3. Free disk space (optional)
+    # 3. Free disk space
     # ===============================
     - name: Free disk space
       run: |
@@ -62,45 +62,56 @@ jobs:
           upx-ucl unzip vim wget xmlto xxd zlib1g-dev
 
     # ===============================
-    # 5. Clone OpenWrt source
+    # 5. Prepare build directory
+    # ===============================
+    - name: Prepare /mnt build directory
+      run: |
+        sudo mkdir -p $OPENWRT_DIR
+        sudo chown $USER:$USER $OPENWRT_DIR
+
+    # ===============================
+    # 6. Clone openwrt-ipq source
     # ===============================
     - name: Clone openwrt-ipq
       run: |
         git clone --depth=1 -b $REPO_BRANCH $REPO_URL $OPENWRT_DIR
 
     # ===============================
-    # 6. Prepare feeds
+    # 7. Copy ci.config and diy-part1.sh
+    # ===============================
+    - name: Copy configs and DIY script
+      run: |
+        cp ${{ github.workspace }}/$CONFIG_FILE $OPENWRT_DIR/
+        cp ${{ github.workspace }}/$DIY_SCRIPT $OPENWRT_DIR/
+
+    # ===============================
+    # 8. Prepare feeds
     # ===============================
     - name: Update & install feeds
       run: |
         cd $OPENWRT_DIR
-        # 如果 FEEDS_CONF 不同才拷贝
-        if [ "$FEEDS_CONF" != "feeds.conf.default" ]; then
-          cp $GITHUB_WORKSPACE/$FEEDS_CONF feeds.conf.default
-        fi
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
     # ===============================
-    # 7. Apply diy-part1.sh (QModem, AdGuardHome, theme)
+    # 9. Apply diy-part1.sh (QModem etc.)
     # ===============================
-    - name: Apply custom DIY packages
+    - name: Apply diy-part1.sh
       run: |
         cd $OPENWRT_DIR
-        chmod +x $GITHUB_WORKSPACE/diy-part1.sh
-        $GITHUB_WORKSPACE/diy-part1.sh
+        chmod +x $DIY_SCRIPT
+        ./$DIY_SCRIPT
 
     # ===============================
-    # 8. Load ci.config
+    # 10. Load ci.config
     # ===============================
     - name: Load ci.config
       run: |
         cd $OPENWRT_DIR
-        cp $GITHUB_WORKSPACE/$CONFIG_FILE .config
         make defconfig
 
     # ===============================
-    # 9. Download sources
+    # 11. Download all sources
     # ===============================
     - name: Download packages
       run: |
@@ -108,7 +119,7 @@ jobs:
         make download -j$(nproc) V=s
 
     # ===============================
-    # 10. Build firmware
+    # 12. Build firmware
     # ===============================
     - name: Build firmware
       run: |
@@ -116,11 +127,11 @@ jobs:
         make -j$(nproc) V=s
 
     # ===============================
-    # 11. Upload firmware
+    # 13. Upload firmware artifacts
     # ===============================
     - name: Upload firmware
       if: env.UPLOAD_FIRMWARE == 'true'
       uses: actions/upload-artifact@v4
       with:
         name: Swaiot-CPE-S10-ipq807x-NSS
-        path: ${{ env.OPENWRT_DIR }}/bin/targets/qualcommax/ipq807x/
+        path: $OPENWRT_DIR/bin/targets/qualcommax/ipq807x/
