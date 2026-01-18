@@ -1,68 +1,54 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
-echo "==> Preloading qca-nss-drv source"
+echo "==> DIY script start"
 
 OPENWRT_DIR="${OPENWRT_DIR:-$(pwd)}"
+DIYPATH="$OPENWRT_DIR/package/diypath"
 DL_DIR="$OPENWRT_DIR/dl"
 
-mkdir -p "$DL_DIR"
+mkdir -p "$DIYPATH" "$DL_DIR"
+
+###############################################################################
+echo "==> [1/6] Preload qca-nss-drv source"
+###############################################################################
+
 cd "$DL_DIR"
 
 if [ ! -d qca-nss-drv ]; then
-  if [ -n "$GITHUB_TOKEN" ]; then
-    echo "==> Cloning qca-nss-drv with GITHUB_TOKEN"
+  if [ -n "${GITHUB_TOKEN:-}" ]; then
+    echo "==> Clone qca-nss-drv with GITHUB_TOKEN"
     git clone --depth=1 \
       https://x-access-token:${GITHUB_TOKEN}@github.com/Jim78778/qca-nss-drv.git
   else
-    echo "==> Cloning qca-nss-drv without token (local build?)"
+    echo "==> Clone qca-nss-drv without token"
     git clone --depth=1 \
       https://github.com/Jim78778/qca-nss-drv.git
   fi
 fi
 
 if [ ! -f qca-nss-drv-preload.tar.gz ]; then
-  echo "==> Packing qca-nss-drv-preload.tar.gz"
   tar -czf qca-nss-drv-preload.tar.gz qca-nss-drv
 fi
 
 ls -lh qca-nss-drv-preload.tar.gz
 
+###############################################################################
+echo "==> [2/6] Force qca-nss-drv use local tarball"
+###############################################################################
 
-echo "=== Step 1: Add QModem ==="
-# 使用 fork 的 QModem 仓库
-git clone --depth=1 https://github.com/FUjr/QModem.git $DIYPATH/qmodem
+NSS_MK="package/feeds/nss_packages/qca-nss-drv/Makefile"
 
-#修复jq/host
-sed -i '/jq\/host/d' \
-  package/feeds/luci/luci-app-advanced-reboot/Makefile
+if [ -f "$OPENWRT_DIR/$NSS_MK" ]; then
+  sed -i \
+    -e 's/^PKG_SOURCE_PROTO:=.*/# &/' \
+    -e 's/^PKG_SOURCE_URL:=.*/PKG_SOURCE_URL:=file:\/\/$(DL_DIR)/' \
+    -e 's/^PKG_SOURCE_VERSION:=.*/# &/' \
+    "$OPENWRT_DIR/$NSS_MK"
 
-# 修复 QModem Makefile 中不必要的依赖，适配 PCIe
-sed -i \
-  -e 's/kmod-usb-net-qmi-wwan-ctrl/kmod-mhi-wwan-ctrl/g' \
-  -e 's/kmod-usb-net-qmi-wwan-mbim/kmod-mhi-wwan-mbim/g' \
-  -e 's/-M//g' \
-  -e 's/PACKAGE_luci-app-qmodem_USING_QWRT_QUECTEL_CM_5G://g' \
-  -e 's/PACKAGE_luci-app-qmodem_USING_NORMAL_QUECTEL_CM://g' \
-  $DIYPATH/qmodem/application/qmodem/Makefile
-
-echo "=== Step 2: Add AdGuardHome ==="
-# 如果 feeds 有 luci-app-adguardhome 可以跳过，否则放到 diypath
-git clone --depth=1 https://github.com/rufengsuixing/luci-app-adguardhome.git $DIYPATH/adguardhome
-
-echo "=== Step 3: Add ttyd ==="
-git clone --depth=1 https://github.com/tsl0922/ttyd.git $DIYPATH/ttyd
-
-echo "=== Step 4: Add custom themes ==="
-# 举例 luci-theme-argon
-git clone --depth=1 https://github.com/jerrykuku/luci-theme-argon.git $DIYPATH/luci-theme-argon
-
-echo "=== Step 5: Register DIY packages in feeds.conf.default ==="
-# 避免重复添加
-grep -qxF "src-link diypath $DIYPATH" $OPENWRT_DIR/feeds.conf.default || \
-  echo "src-link diypath $DIYPATH" >> $OPENWRT_DIR/feeds.conf.default
-
-echo "=== Step 6: All DIY packages ready ==="
-ls -l $DIYPATH
-
+  grep -q '^PKG_SOURCE:=' "$OPENWRT_DIR/$NSS_MK" || \
+    sed -i '1i PKG_SOURCE:=qca-nss-drv-preload.tar.gz\nPKG_HASH:=skip\n' \
+      "$OPENWRT_DIR/$NSS_MK"
+else
+  echo "WARNING: qca-nss-dr
 
