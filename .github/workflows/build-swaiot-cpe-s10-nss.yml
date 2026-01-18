@@ -14,36 +14,29 @@ env:
   DIY_SCRIPT: diy-part1.sh
   UPLOAD_FIRMWARE: true
   OPENWRT_DIR: /mnt/openwrt-build
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
 jobs:
   build:
     runs-on: ubuntu-22.04
 
     steps:
-    # ===============================
     # 1. Checkout workflow repo
-    # ===============================
     - name: Checkout workflow repo
       uses: actions/checkout@v4
 
-    # ===============================
     # 2. Set timezone
-    # ===============================
     - name: Set timezone
       run: sudo timedatectl set-timezone "$TZ"
 
-    # ===============================
-    # 3. Free disk space (VERY IMPORTANT)
-    # ===============================
+    # 3. Free disk space
     - name: Free disk space
       run: |
         sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
         sudo apt-get clean
         df -h
 
-    # ===============================
     # 4. Install build dependencies
-    # ===============================
     - name: Install build dependencies
       run: |
         sudo apt update
@@ -51,102 +44,77 @@ jobs:
           ack antlr3 asciidoc autoconf automake autopoint binutils bison \
           build-essential bzip2 ccache clang cmake cpio curl \
           device-tree-compiler ecj fastjar flex gawk gettext \
-          gcc g++ gcc-12 g++-12 \
-          gcc-multilib g++-multilib git gperf haveged help2man \
-          intltool jq lib32gcc-s1 libc6-dev-i386 libelf-dev \
-          libglib2.0-dev libgmp3-dev libltdl-dev libmpc-dev \
-          libmpfr-dev libncurses5-dev libncursesw5-dev \
-          libreadline-dev libssl-dev libtool lld lrzsz \
-          mkisofs msmtp nano ninja-build p7zip p7zip-full \
-          patch pkgconf python-is-python3 \
-          python3 python3-pip python3-ply python3-socks \
-          python3-docutils python3-unidecode \
-          python3-setuptools python3-wheel \
-          qemu-utils re2c rsync scons \
-          squashfs-tools subversion swig texinfo uglifyjs \
-          upx-ucl unzip vim wget xmlto xxd zlib1g-dev \
-          bc file time xz-utils zstd \
-          liblzma-dev libzstd-dev libstdc++-12-dev \
-          libcap-dev libnl-3-dev libnl-genl-3-dev
+          gcc g++ gcc-12 g++-12 gcc-multilib g++-multilib \
+          git gperf haveged help2man intltool jq lib32gcc-s1 libc6-dev-i386 \
+          libelf-dev libglib2.0-dev libgmp3-dev libltdl-dev libmpc-dev \
+          libmpfr-dev libncurses5-dev libncursesw5-dev libreadline-dev \
+          libssl-dev libtool lld lrzsz mkisofs msmtp nano ninja-build \
+          p7zip p7zip-full patch pkgconf python-is-python3 python3 python3-pip \
+          python3-ply python3-socks python3-docutils python3-unidecode \
+          python3-setuptools python3-wheel qemu-utils re2c rsync scons \
+          squashfs-tools subversion swig texinfo uglifyjs upx-ucl unzip vim \
+          wget xmlto xxd zlib1g-dev bc file time xz-utils zstd \
+          liblzma-dev libzstd-dev libstdc++-12-dev libcap-dev libnl-3-dev libnl-genl-3-dev
 
-    # ===============================
-    # 5. Prepare build directory on /mnt
-    # ===============================
+    # 5. Prepare /mnt build directory
     - name: Prepare /mnt build directory
       run: |
         sudo mkdir -p "$OPENWRT_DIR"
         sudo chown $USER:$USER "$OPENWRT_DIR"
         df -h /mnt
 
-    # ===============================
     # 6. Clone openwrt-ipq source
-    # ===============================
     - name: Clone openwrt-ipq
       run: |
         git clone --depth=1 -b "$REPO_BRANCH" "$REPO_URL" "$OPENWRT_DIR"
 
-    # ===============================
     # 7. Copy ci.config and diy script
-    # ===============================
     - name: Copy configs and DIY script
       run: |
         cp "${{ github.workspace }}/$CONFIG_FILE" "$OPENWRT_DIR/.config"
         cp "${{ github.workspace }}/$DIY_SCRIPT" "$OPENWRT_DIR/"
         chmod +x "$OPENWRT_DIR/$DIY_SCRIPT"
 
-    # ===============================
     # 8. Update & install feeds
-    # ===============================
     - name: Update & install feeds
       run: |
         cd "$OPENWRT_DIR"
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
-    # ===============================
     # 9. Apply diy-part1.sh
-    # ===============================
     - name: Apply diy-part1.sh
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
-        cd $OPENWRT_DIR
-        chmod +x $DIY_SCRIPT
+        cd "$OPENWRT_DIR"
+        chmod +x "$DIY_SCRIPT"
         ./$DIY_SCRIPT
-   
-    # ===============================
+
     # 10. Load config
-    # ===============================
     - name: Load config
       run: |
         cd "$OPENWRT_DIR"
         make defconfig
 
+    # Debug NSS config
     - name: Debug NSS config
       run: |
-        cd $OPENWRT_DIR
+        cd "$OPENWRT_DIR"
         echo "===== NSS / qca-nss config ====="
         grep -E "NSS|qca-nss" .config || true
 
-    # ===============================
-    # 11. Download all sources (low memory & stable)
-    # ===============================
+    # 11. Download all sources
     - name: Download packages
       run: |
         cd "$OPENWRT_DIR"
         make download -j1 V=s
 
-    # ===============================
     # 12. Build firmware
-    # ===============================
     - name: Build firmware
       run: |
         cd "$OPENWRT_DIR"
         make -j$(nproc) V=s
 
-    # ===============================
     # 13. Upload firmware
-    # ===============================
     - name: Upload firmware
       if: env.UPLOAD_FIRMWARE == 'true'
       uses: actions/upload-artifact@v4
