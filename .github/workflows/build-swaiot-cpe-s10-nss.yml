@@ -55,6 +55,8 @@ jobs:
           wget xmlto xxd zlib1g-dev bc file time xz-utils zstd \
           liblzma-dev libzstd-dev libstdc++-12-dev libcap-dev libnl-3-dev libnl-genl-3-dev
 
+          pip3 install pysocks unidecode
+      
     # 5. Prepare /mnt build directory
     - name: Prepare /mnt build directory
       run: |
