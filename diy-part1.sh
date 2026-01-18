@@ -1,10 +1,33 @@
 #!/bin/bash
 set -e
 
-DIYPATH="package/diypath"
-OPENWRT_DIR="$(pwd)"
+echo "==> Preloading qca-nss-drv source"
 
-mkdir -p $DIYPATH
+OPENWRT_DIR="${OPENWRT_DIR:-$(pwd)}"
+DL_DIR="$OPENWRT_DIR/dl"
+
+mkdir -p "$DL_DIR"
+cd "$DL_DIR"
+
+if [ ! -d qca-nss-drv ]; then
+  if [ -n "$GITHUB_TOKEN" ]; then
+    echo "==> Cloning qca-nss-drv with GITHUB_TOKEN"
+    git clone --depth=1 \
+      https://x-access-token:${GITHUB_TOKEN}@github.com/Jim78778/qca-nss-drv.git
+  else
+    echo "==> Cloning qca-nss-drv without token (local build?)"
+    git clone --depth=1 \
+      https://github.com/Jim78778/qca-nss-drv.git
+  fi
+fi
+
+if [ ! -f qca-nss-drv-preload.tar.gz ]; then
+  echo "==> Packing qca-nss-drv-preload.tar.gz"
+  tar -czf qca-nss-drv-preload.tar.gz qca-nss-drv
+fi
+
+ls -lh qca-nss-drv-preload.tar.gz
+
 
 echo "=== Step 1: Add QModem ==="
 # 使用 fork 的 QModem 仓库
