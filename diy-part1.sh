@@ -3,75 +3,77 @@ set -euo pipefail
 
 echo "==> DIY script start"
 
-# ------------------------------------------------------------------
-# 基础路径定义（显式、可预测）
-# ------------------------------------------------------------------
 OPENWRT_DIR="${OPENWRT_DIR:-$(pwd)}"
 DIYPATH="$OPENWRT_DIR/package/diypath"
+DL_DIR="$OPENWRT_DIR/dl"
 
-mkdir -p "$DIYPATH"
+mkdir -p "$DIYPATH" "$DL_DIR"
 
-# ------------------------------------------------------------------
-echo "==> [1/4] Add QModem"
-# ------------------------------------------------------------------
+###############################################################################
+echo "==> [1/6] Preload NSS Packages source"
+###############################################################################
 
-cd "$DIYPATH"
+cd "$DL_DIR"
 
-if [ ! -d qmodem ]; then
-  git clone --depth=1 https://github.com/FUjr/QModem.git qmodem
-fi
-
-QMODEM_MK="$DIYPATH/qmodem/application/qmodem/Makefile"
-
-if [ -f "$QMODEM_MK" ]; then
-  sed -i \
-    -e 's/kmod-usb-net-qmi-wwan-ctrl/kmod-mhi-wwan-ctrl/g' \
-    -e 's/kmod-usb-net-qmi-wwan-mbim/kmod-mhi-wwan-mbim/g' \
-    -e 's/-M//g' \
-    -e 's/PACKAGE_luci-app-qmodem_USING_QWRT_QUECTEL_CM_5G://g' \
-    -e 's/PACKAGE_luci-app-qmodem_USING_NORMAL_QUECTEL_CM://g' \
-    "$QMODEM_MK"
+if [ ! -d nss-packages ]; then
+  echo "==> Clone qosmio/nss-packages (public)"
+  git clone --depth=1 https://github.com/qosmio/nss-packages.git
 else
-  echo "WARNING: QModem Makefile not found, skip patch"
+  echo "==> nss-packages already exists"
 fi
 
-# ------------------------------------------------------------------
-echo "==> [2/4] Fix luci-app-advanced-reboot (safe guard)"
-# ------------------------------------------------------------------
-
-ADV_REBOOT_MK="$OPENWRT_DIR/package/feeds/luci/luci-app-advanced-reboot/Makefile"
-
-if [ -f "$ADV_REBOOT_MK" ]; then
-  sed -i '/jq\/host/d' "$ADV_REBOOT_MK"
+if [ ! -f nss-packages-preload.tar.gz ]; then
+  echo "==> Creating tarball nss-packages-preload.tar.gz"
+  tar -czf nss-packages-preload.tar.gz nss-packages
 else
-  echo "INFO: luci-app-advanced-reboot not present, skip"
+  echo "==> Tarball already exists"
 fi
 
-# ------------------------------------------------------------------
-echo "==> [3/4] Add extra packages"
-# ------------------------------------------------------------------
+ls -lh nss-packages-preload.tar.gz
 
-cd "$DIYPATH"
+###############################################################################
+echo "==> [2/6] Force OpenWrt NSS feed use local tarball"
+###############################################################################
 
-[ -d adguardhome ] || \
-  git clone --depth=1 https://github.com/rufengsuixing/luci-app-adguardhome.git adguardhome
+NSS_FEED="package/feeds/nss_packages"
 
-[ -d ttyd ] || \
-  git clone --depth=1 https://github.com/tsl0922/ttyd.git ttyd
+if [ -d "$OPENWRT_DIR/$NSS_FEED" ]; then
+  echo "==> Patching nss_packages Makefiles"
+  find "$OPENWRT_DIR/$NSS_FEED" -name 'Makefile*' -print0 | while IFS= read -r -d '' MK; do
+    sed -i \
+      -e 's/^PKG_SOURCE_PROTO:=.*/# &/' \
+      -e "s|^PKG_SOURCE_URL:=.*|PKG_SOURCE_URL:=file://$DL_DIR|" \
+      -e 's/^PKG_SOURCE_VERSION:=.*/# &/' \
+      "$MK"
 
-[ -d luci-theme-argon ] || \
-  git clone --depth=1 https://github.com/jerrykuku/luci-theme-argon.git luci-theme-argon
-
-# ------------------------------------------------------------------
-echo "==> [4/4] Register diypath feed (idempotent)"
-# ------------------------------------------------------------------
-
-FEEDS_CONF="$OPENWRT_DIR/feeds.conf.default"
-
-if ! grep -qxF "src-link diypath $DIYPATH" "$FEEDS_CONF"; then
-  echo "src-link diypath $DIYPATH" >> "$FEEDS_CONF"
+    grep -q '^PKG_SOURCE:=' "$MK" || \
+      sed -i "1i PKG_SOURCE:=nss-packages-preload.tar.gz\nPKG_HASH:=skip\n" "$MK"
+  done
+else
+  echo "WARNING: NSS feed dir not found"
 fi
 
-ls -l "$DIYPATH"
+###############################################################################
+echo "==> [3/6] DIYPATH link"
+###############################################################################
 
-echo "==> DIY script done"
+ln -snf "$DL_DIR/nss-packages" "$DIYPATH/nss-packages"
+echo "==> DIYPATH created: $DIYPATH/nss-packages -> $DL_DIR/nss-packages"
+
+###############################################################################
+echo "==> [4/6] Optional clean"
+###############################################################################
+
+# make -C "$OPENWRT_DIR" package/nss_packages clean
+
+###############################################################################
+echo "==> [5/6] Optional patches"
+###############################################################################
+
+# cp -r "$DIYPATH/patches" "$OPENWRT_DIR/package/feeds/nss_packages/"
+
+###############################################################################
+echo "==> [6/6] Done"
+###############################################################################
+
+echo "==> DIY script finished!"
