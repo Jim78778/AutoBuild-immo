@@ -33,7 +33,7 @@ jobs:
       run: sudo timedatectl set-timezone "$TZ"
 
     # ===============================
-    # 3. Free disk space
+    # 3. Free disk space (root fs)
     # ===============================
     - name: Free disk space
       run: |
@@ -69,15 +69,16 @@ jobs:
           libcap-dev libnl-3-dev libnl-genl-3-dev
 
     # ===============================
-    # 5. Prepare build directory
+    # 5. Prepare /mnt build directory
     # ===============================
     - name: Prepare /mnt build directory
       run: |
         sudo mkdir -p $OPENWRT_DIR
         sudo chown $USER:$USER $OPENWRT_DIR
+        df -h /mnt
 
     # ===============================
-    # 6. Clone openwrt-ipq source
+    # 6. Clone openwrt-ipq to /mnt
     # ===============================
     - name: Clone openwrt-ipq
       run: |
@@ -90,6 +91,7 @@ jobs:
       run: |
         cp ${{ github.workspace }}/$CONFIG_FILE $OPENWRT_DIR/.config
         cp ${{ github.workspace }}/$DIY_SCRIPT $OPENWRT_DIR/
+        chmod +x $OPENWRT_DIR/$DIY_SCRIPT
 
     # ===============================
     # 8. Update & install feeds
@@ -101,48 +103,16 @@ jobs:
         ./scripts/feeds install -a
 
     # ===============================
-    # 9. Pre-cache qca-nss-drv source (CRITICAL)
-    # ===============================
-    - name: Pre-cache qca-nss-drv source
-      run: |
-        set -e
-        cd $OPENWRT_DIR
-        mkdir -p dl
-
-        [ -d dl/qca-nss-drv ] || \
-          git clone --depth=1 https://github.com/Jim78778/qca-nss-drv.git dl/qca-nss-drv
-
-        cd dl
-        tar -czf qca-nss-drv-preload.tar.gz qca-nss-drv
-        ls -lh qca-nss-drv-preload.tar.gz
-
-    # ===============================
-    # 10. Patch qca-nss-drv Makefile to use local cache
-    # ===============================
-    - name: Patch qca-nss-drv Makefile
-      run: |
-        cd $OPENWRT_DIR
-        sed -i \
-          -e 's#^PKG_SOURCE_PROTO:=.*##' \
-          -e 's#^PKG_SOURCE_URL:=.*#PKG_SOURCE_URL:=file://$(TOPDIR)/dl#' \
-          -e 's#^PKG_SOURCE_VERSION:=.*##' \
-          package/feeds/nss_packages/qca-nss-drv/Makefile
-
-        grep -q '^PKG_SOURCE:=' package/feeds/nss_packages/qca-nss-drv/Makefile || \
-          sed -i '1i PKG_SOURCE:=qca-nss-drv-preload.tar.gz\nPKG_HASH:=skip\n' \
-          package/feeds/nss_packages/qca-nss-drv/Makefile
-
-    # ===============================
-    # 11. Apply diy-part1.sh (QModem / NSS tweaks)
+    # 9. Apply diy-part1.sh
+    #    (包含 qca-nss-drv 本地化逻辑)
     # ===============================
     - name: Apply diy-part1.sh
       run: |
         cd $OPENWRT_DIR
-        chmod +x $DIY_SCRIPT
-        ./$DIY_SCRIPT
+        ./diy-part1.sh
 
     # ===============================
-    # 12. Load config
+    # 10. Load config
     # ===============================
     - name: Load ci.config
       run: |
@@ -150,7 +120,7 @@ jobs:
         make defconfig
 
     # ===============================
-    # 13. Download all sources (stable)
+    # 11. Download all sources
     # ===============================
     - name: Download packages
       run: |
@@ -158,7 +128,7 @@ jobs:
         make download -j1 V=s
 
     # ===============================
-    # 14. Build firmware
+    # 12. Build firmware
     # ===============================
     - name: Build firmware
       run: |
@@ -166,7 +136,7 @@ jobs:
         make -j$(nproc) V=s
 
     # ===============================
-    # 15. Upload firmware
+    # 13. Upload firmware
     # ===============================
     - name: Upload firmware
       if: env.UPLOAD_FIRMWARE == 'true'
