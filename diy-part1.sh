@@ -17,7 +17,8 @@ cd "$DL_DIR"
 
 if [ ! -d nss-packages ]; then
   echo "==> Clone qosmio/nss-packages (public)"
-  git clone --depth=1 https://github.com/qosmio/nss-packages.git
+  git clone --depth=1 \
+    https://github.com/qosmio/nss-packages.git
 else
   echo "==> nss-packages already exists"
 fi
@@ -35,6 +36,7 @@ ls -lh nss-packages-preload.tar.gz
 echo "==> [2/6] Force OpenWrt NSS feed use local tarball"
 ###############################################################################
 
+# 假设 openwrt feeds 有 nss_packages 目录
 NSS_FEED="package/feeds/nss_packages"
 
 if [ -d "$OPENWRT_DIR/$NSS_FEED" ]; then
@@ -47,7 +49,8 @@ if [ -d "$OPENWRT_DIR/$NSS_FEED" ]; then
       "$MK"
 
     grep -q '^PKG_SOURCE:=' "$MK" || \
-      sed -i "1i PKG_SOURCE:=nss-packages-preload.tar.gz\nPKG_HASH:=skip\n" "$MK"
+      sed -i "1i PKG_SOURCE:=nss-packages-preload.tar.gz\nPKG_HASH:=skip\n" \
+        "$MK"
   done
 else
   echo "WARNING: NSS feed dir not found"
@@ -61,10 +64,49 @@ ln -snf "$DL_DIR/nss-packages" "$DIYPATH/nss-packages"
 echo "==> DIYPATH created: $DIYPATH/nss-packages -> $DL_DIR/nss-packages"
 
 ###############################################################################
-echo "==> [4/6] Optional clean"
+echo "==> [4/6] 精简 NSS 配置：只保留 WWAN + WiFi"
 ###############################################################################
 
-# make -C "$OPENWRT_DIR" package/nss_packages clean
+CONFIG_FILE="$OPENWRT_DIR/.config"
+
+if [ -f "$CONFIG_FILE" ]; then
+  echo "==> Modifying .config to keep only WWAN + WiFi NSS modules"
+
+  # 注释掉不需要的 NSS 模块
+  sed -i \
+    -e 's/^CONFIG_DEFAULT_kmod-qca-nss-drv-bridge-mgr=y/# &/' \
+    -e 's/^CONFIG_NSS_DRV_CAPWAP_ENABLE=y/# &/' \
+    -e 's/^CONFIG_NSS_DRV_C2C_ENABLE=y/# &/' \
+    -e 's/^CONFIG_NSS_DRV_CLMAP_ENABLE=y/# &/' \
+    -e 's/^CONFIG_NSS_DRV_CRYPTO_ENABLE=y/# &/' \
+    -e 's/^CONFIG_NSS_DRV_DTLS_ENABLE=y/# &/' \
+    -e 's/^CONFIG_NSS_DRV_GRE_ENABLE=y/# &/' \
+    -e 's/^CONFIG_NSS_DRV_IGS_ENABLE=y/# &/' \
+    -e 's/^CONFIG_NSS_DRV_IPSEC_ENABLE=y/# &/' \
+    -e 's/^CONFIG_NSS_DRV_L2TP_ENABLE=y/# &/' \
+    -e 's/^CONFIG_NSS_DRV_LAG_ENABLE=y/# &/' \
+    -e 's/^CONFIG_NSS_DRV_MAPT_ENABLE=y/# &/' \
+    -e 's/^CONFIG_NSS_DRV_MATCH_ENABLE=y/# &/' \
+    -e 's/^CONFIG_NSS_DRV_MIRROR_ENABLE=y/# &/' \
+    -e 's/^CONFIG_NSS_DRV_LSO_RX_ENABLE=y/# &/' \
+    -e 's/^CONFIG_NSS_DRV_PPTP_ENABLE=y/# &/' \
+    -e 's/^CONFIG_NSS_DRV_PVXLAN_ENABLE=y/# &/' \
+    -e 's/^CONFIG_NSS_DRV_QRFS_ENABLE=y/# &/' \
+    -e 's/^CONFIG_NSS_DRV_QVPN_ENABLE=y/# &/' \
+    -e 's/^CONFIG_NSS_DRV_SHAPER_ENABLE=y/# &/' \
+    -e 's/^CONFIG_NSS_DRV_SJACK_ENABLE=y/# &/' \
+    -e 's/^CONFIG_NSS_DRV_TLS_ENABLE=y/# &/' \
+    -e 's/^CONFIG_NSS_DRV_TRUSTSEC_ENABLE=y/# &/' \
+    -e 's/^CONFIG_NSS_DRV_UDP_ST_ENABLE=y/# &/' \
+    -e 's/^CONFIG_NSS_DRV_TUN6RD_ENABLE=y/# &/' \
+    -e 's/^CONFIG_NSS_DRV_TUNIPIP6_ENABLE=y/# &/' \
+    -e 's/^CONFIG_NSS_DRV_VXLAN_ENABLE=y/# &/' \
+    "$CONFIG_FILE"
+
+  echo "==> NSS 精简完成，只保留 WWAN + WiFi"
+else
+  echo "WARNING: .config not found, skip NSS config modification"
+fi
 
 ###############################################################################
 echo "==> [5/6] Optional patches"
