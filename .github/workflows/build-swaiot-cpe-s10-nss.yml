@@ -109,8 +109,12 @@ jobs:
         cd $OPENWRT_DIR
         mkdir -p dl
 
-        [ -d dl/qca-nss-drv ] || \
-          git clone --depth=1 https://github.com/Jim78778/qca-nss-drv.git dl/qca-nss-drv
+        if [ ! -d dl/qca-nss-drv ]; then
+          git clone --depth=1 \
+            https://x-access-token:${{ github.token }}@github.com/Jim78778/qca-nss-drv.git \
+            dl/qca-nss-drv
+        fi
+
 
         cd dl
         tar -czf qca-nss-drv-preload.tar.gz qca-nss-drv
