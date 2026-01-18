@@ -35,7 +35,7 @@ jobs:
         sudo apt-get clean
         df -h
 
-    # 4. Install build dependencies
+    # 4. Install build dependencies (apt + pip)
     - name: Install build dependencies
       run: |
         sudo apt update
@@ -53,10 +53,12 @@ jobs:
           python3-setuptools python3-wheel qemu-utils re2c rsync scons \
           squashfs-tools subversion swig texinfo uglifyjs upx-ucl unzip vim \
           wget xmlto xxd zlib1g-dev bc file time xz-utils zstd \
-          liblzma-dev libzstd-dev libstdc++-12-dev libcap-dev libnl-3-dev libnl-genl-3-dev
+          liblzma-dev libzstd-dev libstdc++-12-dev libcap-dev \
+          libnl-3-dev libnl-genl-3-dev
 
-          pip3 install pysocks unidecode
-      
+        # 补齐 OpenWrt host 依赖（feeds/packages 用）
+        sudo pip3 install --no-cache-dir pysocks unidecode
+
     # 5. Prepare /mnt build directory
     - name: Prepare /mnt build directory
       run: |
@@ -83,7 +85,7 @@ jobs:
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
-    # 9. Apply diy-part1.sh (改为使用公开 nss-packages)
+    # 9. Apply diy-part1.sh（精简 NSS：WWAN + WiFi）
     - name: Apply diy-part1.sh
       run: |
         cd "$OPENWRT_DIR"
@@ -96,26 +98,26 @@ jobs:
         cd "$OPENWRT_DIR"
         make defconfig
 
-    # Debug NSS config
+    # 11. Debug NSS config
     - name: Debug NSS config
       run: |
         cd "$OPENWRT_DIR"
         echo "===== NSS / qca-nss config ====="
         grep -E "NSS|qca-nss" .config || true
 
-    # 11. Download all sources
+    # 12. Download all sources
     - name: Download packages
       run: |
         cd "$OPENWRT_DIR"
         make download -j1 V=s
 
-    # 12. Build firmware
+    # 13. Build firmware
     - name: Build firmware
       run: |
         cd "$OPENWRT_DIR"
         make -j$(nproc) V=s
 
-    # 13. Upload firmware
+    # 14. Upload firmware
     - name: Upload firmware
       if: env.UPLOAD_FIRMWARE == 'true'
       uses: actions/upload-artifact@v4
