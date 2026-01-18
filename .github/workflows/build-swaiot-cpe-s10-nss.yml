@@ -84,15 +84,15 @@ jobs:
         git clone --depth=1 -b $REPO_BRANCH $REPO_URL $OPENWRT_DIR
 
     # ===============================
-    # 7. Copy ci.config and diy-part1.sh
+    # 7. Copy ci.config and diy script
     # ===============================
     - name: Copy configs and DIY script
       run: |
-        cp ${{ github.workspace }}/$CONFIG_FILE $OPENWRT_DIR/
+        cp ${{ github.workspace }}/$CONFIG_FILE $OPENWRT_DIR/.config
         cp ${{ github.workspace }}/$DIY_SCRIPT $OPENWRT_DIR/
 
     # ===============================
-    # 8. Prepare feeds
+    # 8. Update & install feeds
     # ===============================
     - name: Update & install feeds
       run: |
@@ -101,7 +101,39 @@ jobs:
         ./scripts/feeds install -a
 
     # ===============================
-    # 9. Apply diy-part1.sh (QModem etc.)
+    # 9. Pre-cache qca-nss-drv source (CRITICAL)
+    # ===============================
+    - name: Pre-cache qca-nss-drv source
+      run: |
+        set -e
+        cd $OPENWRT_DIR
+        mkdir -p dl
+
+        [ -d dl/qca-nss-drv ] || \
+          git clone --depth=1 https://github.com/Jim78778/qca-nss-drv.git dl/qca-nss-drv
+
+        cd dl
+        tar -czf qca-nss-drv-preload.tar.gz qca-nss-drv
+        ls -lh qca-nss-drv-preload.tar.gz
+
+    # ===============================
+    # 10. Patch qca-nss-drv Makefile to use local cache
+    # ===============================
+    - name: Patch qca-nss-drv Makefile
+      run: |
+        cd $OPENWRT_DIR
+        sed -i \
+          -e 's#^PKG_SOURCE_PROTO:=.*##' \
+          -e 's#^PKG_SOURCE_URL:=.*#PKG_SOURCE_URL:=file://$(TOPDIR)/dl#' \
+          -e 's#^PKG_SOURCE_VERSION:=.*##' \
+          package/feeds/nss_packages/qca-nss-drv/Makefile
+
+        grep -q '^PKG_SOURCE:=' package/feeds/nss_packages/qca-nss-drv/Makefile || \
+          sed -i '1i PKG_SOURCE:=qca-nss-drv-preload.tar.gz\nPKG_HASH:=skip\n' \
+          package/feeds/nss_packages/qca-nss-drv/Makefile
+
+    # ===============================
+    # 11. Apply diy-part1.sh (QModem / NSS tweaks)
     # ===============================
     - name: Apply diy-part1.sh
       run: |
@@ -110,7 +142,7 @@ jobs:
         ./$DIY_SCRIPT
 
     # ===============================
-    # 10. Load ci.config
+    # 12. Load config
     # ===============================
     - name: Load ci.config
       run: |
@@ -118,15 +150,15 @@ jobs:
         make defconfig
 
     # ===============================
-    # 11. Download all sources
+    # 13. Download all sources (stable)
     # ===============================
     - name: Download packages
       run: |
         cd $OPENWRT_DIR
-        make download -j$(nproc) V=s
+        make download -j1 V=s
 
     # ===============================
-    # 12. Build firmware
+    # 14. Build firmware
     # ===============================
     - name: Build firmware
       run: |
@@ -134,7 +166,7 @@ jobs:
         make -j$(nproc) V=s
 
     # ===============================
-    # 13. Upload firmware artifacts
+    # 15. Upload firmware
     # ===============================
     - name: Upload firmware
       if: env.UPLOAD_FIRMWARE == 'true'
