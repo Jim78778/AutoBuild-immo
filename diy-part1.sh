@@ -3,9 +3,6 @@ set -euo pipefail
 
 echo "==> DIY script start"
 
-# -----------------------------
-# Variables
-# -----------------------------
 OPENWRT_DIR="${OPENWRT_DIR:-$(pwd)}"
 DIYPATH="$OPENWRT_DIR/package/diypath"
 DL_DIR="$OPENWRT_DIR/dl"
@@ -13,80 +10,74 @@ DL_DIR="$OPENWRT_DIR/dl"
 mkdir -p "$DIYPATH" "$DL_DIR"
 
 ###############################################################################
-echo "==> [1/6] Preload qca-nss-drv source"
+echo "==> [1/6] Preload NSS Packages source"
 ###############################################################################
 
 cd "$DL_DIR"
 
-# 强制使用 GITHUB_TOKEN，否则直接报错，避免 CI 128 错
-if [ ! -d qca-nss-drv ]; then
-  if [ -z "${GITHUB_TOKEN:-}" ]; then
-    echo "ERROR: GITHUB_TOKEN not set. Cannot clone qca-nss-drv in CI."
-    exit 1
-  fi
-  echo "==> Clone qca-nss-drv with GITHUB_TOKEN"
+if [ ! -d nss-packages ]; then
+  echo "==> Clone qosmio/nss-packages (public)"
   git clone --depth=1 \
-    "https://x-access-token:${GITHUB_TOKEN}@github.com/Jim78778/qca-nss-drv.git"
+    https://github.com/qosmio/nss-packages.git
 else
-  echo "==> qca-nss-drv already exists, skipping clone"
+  echo "==> nss-packages already exists"
 fi
 
-# 打包 tarball
-if [ ! -f qca-nss-drv-preload.tar.gz ]; then
-  echo "==> Creating tarball qca-nss-drv-preload.tar.gz"
-  tar -czf qca-nss-drv-preload.tar.gz qca-nss-drv
+if [ ! -f nss-packages-preload.tar.gz ]; then
+  echo "==> Creating tarball nss-packages-preload.tar.gz"
+  tar -czf nss-packages-preload.tar.gz nss-packages
 else
-  echo "==> Tarball qca-nss-drv-preload.tar.gz already exists"
+  echo "==> Tarball already exists"
 fi
 
-ls -lh qca-nss-drv-preload.tar.gz
+ls -lh nss-packages-preload.tar.gz
 
 ###############################################################################
-echo "==> [2/6] Force qca-nss-drv use local tarball"
+echo "==> [2/6] Force OpenWrt NSS feed use local tarball"
 ###############################################################################
 
-NSS_MK="package/feeds/nss_packages/qca-nss-drv/Makefile"
+# 假设 openwrt feeds 有 nss_packages 目录
+NSS_FEED="package/feeds/nss_packages"
 
-if [ -f "$OPENWRT_DIR/$NSS_MK" ]; then
-  echo "==> Patching Makefile to use local tarball"
-  sed -i \
-    -e 's/^PKG_SOURCE_PROTO:=.*/# &/' \
-    -e "s|^PKG_SOURCE_URL:=.*|PKG_SOURCE_URL:=file://$DL_DIR|" \
-    -e 's/^PKG_SOURCE_VERSION:=.*/# &/' \
-    "$OPENWRT_DIR/$NSS_MK"
+if [ -d "$OPENWRT_DIR/$NSS_FEED" ]; then
+  echo "==> Patching nss_packages Makefiles"
+  find "$OPENWRT_DIR/$NSS_FEED" -name 'Makefile*' -print0 | while IFS= read -r -d '' MK; do
+    sed -i \
+      -e 's/^PKG_SOURCE_PROTO:=.*/# &/' \
+      -e "s|^PKG_SOURCE_URL:=.*|PKG_SOURCE_URL:=file://$DL_DIR|" \
+      -e 's/^PKG_SOURCE_VERSION:=.*/# &/' \
+      "$MK"
 
-  grep -q '^PKG_SOURCE:=' "$OPENWRT_DIR/$NSS_MK" || \
-    sed -i "1i PKG_SOURCE:=qca-nss-drv-preload.tar.gz\nPKG_HASH:=skip\n" \
-      "$OPENWRT_DIR/$NSS_MK"
+    grep -q '^PKG_SOURCE:=' "$MK" || \
+      sed -i "1i PKG_SOURCE:=nss-packages-preload.tar.gz\nPKG_HASH:=skip\n" \
+        "$MK"
+  done
 else
-  echo "WARNING: $NSS_MK not found, cannot patch qca-nss-drv Makefile"
+  echo "WARNING: NSS feed dir not found"
 fi
 
 ###############################################################################
-echo "==> [3/6] Ensure DIYPATH is linked"
+echo "==> [3/6] DIYPATH link"
 ###############################################################################
 
-ln -snf "$DL_DIR/qca-nss-drv" "$DIYPATH/qca-nss-drv"
-echo "==> DIYPATH link created: $DIYPATH/qca-nss-drv -> $DL_DIR/qca-nss-drv"
+ln -snf "$DL_DIR/nss-packages" "$DIYPATH/nss-packages"
+echo "==> DIYPATH created: $DIYPATH/nss-packages -> $DL_DIR/nss-packages"
 
 ###############################################################################
-echo "==> [4/6] Optional: Clean previous build"
+echo "==> [4/6] Optional clean"
 ###############################################################################
 
-# 可选清理
-# echo "==> Cleaning previous qca-nss-drv build"
-# make -C "$OPENWRT_DIR" package/qca-nss-drv/clean
+# make -C "$OPENWRT_DIR" package/nss_packages clean
 
 ###############################################################################
-echo "==> [5/6] Optional: Apply custom patches"
+echo "==> [5/6] Optional patches"
 ###############################################################################
 
-# 可选 patch 插槽
-# echo "==> Applying custom patches"
-# cp -r "$DIYPATH/patches/"* "$OPENWRT_DIR/package/feeds/nss_packages/qca-nss-drv/"
+# cp -r "$DIYPATH/patches" "$OPENWRT_DIR/package/feeds/nss_packages/"
 
 ###############################################################################
 echo "==> [6/6] Done"
 ###############################################################################
 
-echo "==> DIY script finished successfully!"
+echo "==> DIY script finished!"
+
