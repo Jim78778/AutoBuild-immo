@@ -107,10 +107,13 @@ jobs:
     # 9. Apply diy-part1.sh
     # ===============================
     - name: Apply diy-part1.sh
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
-        cd "$OPENWRT_DIR"
-        ./"$DIY_SCRIPT"
-
+        cd $OPENWRT_DIR
+        chmod +x $DIY_SCRIPT
+        ./$DIY_SCRIPT
+   
     # ===============================
     # 10. Load config
     # ===============================
