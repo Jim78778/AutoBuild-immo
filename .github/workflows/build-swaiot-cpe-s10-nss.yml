@@ -119,6 +119,12 @@ jobs:
         cd "$OPENWRT_DIR"
         make defconfig
 
+    - name: Debug NSS config
+      run: |
+        cd $OPENWRT_DIR
+        echo "===== NSS / qca-nss config ====="
+        grep -E "NSS|qca-nss" .config || true
+
     # ===============================
     # 11. Download all sources (low memory & stable)
     # ===============================
