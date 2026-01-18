@@ -17,11 +17,16 @@ cd "$DL_DIR"
 
 if [ ! -d nss-packages ]; then
   echo "==> Clone qosmio/nss-packages (public)"
-  git clone --depth=1 \
-    https://github.com/qosmio/nss-packages.git
+  git clone --depth=1 https://github.com/qosmio/nss-packages.git
 else
   echo "==> nss-packages already exists"
 fi
+
+# 精简 NSS：只保留 WWAN + WiFi
+echo "==> [1.1/6] Prune NSS packages (keep only WWAN + WiFi)"
+cd nss-packages
+find . -maxdepth 1 -type d ! -name '.' ! -name 'wwan' ! -name 'wifi' -exec rm -rf {} +
+cd ..
 
 if [ ! -f nss-packages-preload.tar.gz ]; then
   echo "==> Creating tarball nss-packages-preload.tar.gz"
@@ -36,11 +41,10 @@ ls -lh nss-packages-preload.tar.gz
 echo "==> [2/6] Force OpenWrt NSS feed use local tarball"
 ###############################################################################
 
-# 假设 openwrt feeds 有 nss_packages 目录
 NSS_FEED="package/feeds/nss_packages"
 
 if [ -d "$OPENWRT_DIR/$NSS_FEED" ]; then
-  echo "==> Patching nss_packages Makefiles"
+  echo "==> Patching nss_packages Makefiles to use local tarball"
   find "$OPENWRT_DIR/$NSS_FEED" -name 'Makefile*' -print0 | while IFS= read -r -d '' MK; do
     sed -i \
       -e 's/^PKG_SOURCE_PROTO:=.*/# &/' \
@@ -49,9 +53,13 @@ if [ -d "$OPENWRT_DIR/$NSS_FEED" ]; then
       "$MK"
 
     grep -q '^PKG_SOURCE:=' "$MK" || \
-      sed -i "1i PKG_SOURCE:=nss-packages-preload.tar.gz\nPKG_HASH:=skip\n" \
-        "$MK"
+      sed -i "1i PKG_SOURCE:=nss-packages-preload.tar.gz\nPKG_HASH:=skip\n" "$MK"
   done
+
+  # 修复 OpenWrt 递归依赖问题（select → depends on）
+  echo "==> [2.1/6] Fix recursive dependency for kmod-tls"
+  sed -i 's/select PACKAGE_kmod-tls/depends on PACKAGE_kmod-tls/g' "$OPENWRT_DIR/package/libs/openssl/Config.in"
+
 else
   echo "WARNING: NSS feed dir not found"
 fi
@@ -80,4 +88,3 @@ echo "==> [6/6] Done"
 ###############################################################################
 
 echo "==> DIY script finished!"
-
