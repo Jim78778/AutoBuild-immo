@@ -14,7 +14,6 @@ env:
   DIY_SCRIPT: diy-part1.sh
   UPLOAD_FIRMWARE: true
   OPENWRT_DIR: /mnt/openwrt-build
-  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
 jobs:
   build:
@@ -82,7 +81,7 @@ jobs:
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
-    # 9. Apply diy-part1.sh
+    # 9. Apply diy-part1.sh (改为使用公开 nss-packages)
     - name: Apply diy-part1.sh
       run: |
         cd "$OPENWRT_DIR"
