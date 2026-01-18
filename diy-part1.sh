@@ -1,42 +1,77 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
-DIYPATH="package/diypath"
-OPENWRT_DIR="$(pwd)"
+echo "==> DIY script start"
 
-mkdir -p $DIYPATH
+# ------------------------------------------------------------------
+# 基础路径定义（显式、可预测）
+# ------------------------------------------------------------------
+OPENWRT_DIR="${OPENWRT_DIR:-$(pwd)}"
+DIYPATH="$OPENWRT_DIR/package/diypath"
 
-echo "=== Step 1: Add QModem ==="
-# 使用你 fork 的 QModem 仓库
-git clone --depth=1 https://github.com/FUjr/QModem.git $DIYPATH/qmodem
+mkdir -p "$DIYPATH"
 
-# 修复 QModem Makefile 中不必要的依赖
-sed -i \
-  -e 's/kmod-mhi-wwan/kmod-usb-net-qmi-wwan/g' \
-  -e 's/quectel-CM-5G//g' \
-  -e 's/quectel-cm//g' \
-  $DIYPATH/qmodem/application/qmodem/Makefile
+# ------------------------------------------------------------------
+echo "==> [1/4] Add QModem"
+# ------------------------------------------------------------------
 
-echo "=== Step 2: Add AdGuardHome ==="
-# 直接从官方 feeds 拉 luci-app-adguardhome
-# 如果 feeds 没有，需要你自行放入 diypath/adguardhome
-git clone --depth=1 https://github.com/rufengsuixing/luci-app-adguardhome.git $DIYPATH/adguardhome
+cd "$DIYPATH"
 
-echo "=== Step 3: Add ttyd ==="
-git clone --depth=1 https://github.com/tsl0922/ttyd.git $DIYPATH/ttyd
+if [ ! -d qmodem ]; then
+  git clone --depth=1 https://github.com/FUjr/QModem.git qmodem
+fi
 
-echo "=== Step 4: Add custom themes ==="
-# 举例添加 luci-theme-argon
-git clone --depth=1 https://github.com/jerrykuku/luci-theme-argon.git $DIYPATH/luci-theme-argon
+QMODEM_MK="$DIYPATH/qmodem/application/qmodem/Makefile"
 
-echo "=== Step 5: Fix dependencies ==="
-# 强制安装 QModem 依赖包
-cat >> $OPENWRT_DIR/feeds.conf.default <<EOL
-src-git qmodem https://github.com/FUjr/QModem.git;main
-EOL
+if [ -f "$QMODEM_MK" ]; then
+  sed -i \
+    -e 's/kmod-usb-net-qmi-wwan-ctrl/kmod-mhi-wwan-ctrl/g' \
+    -e 's/kmod-usb-net-qmi-wwan-mbim/kmod-mhi-wwan-mbim/g' \
+    -e 's/-M//g' \
+    -e 's/PACKAGE_luci-app-qmodem_USING_QWRT_QUECTEL_CM_5G://g' \
+    -e 's/PACKAGE_luci-app-qmodem_USING_NORMAL_QUECTEL_CM://g' \
+    "$QMODEM_MK"
+else
+  echo "WARNING: QModem Makefile not found, skip patch"
+fi
 
-# 如果需要，可以在这里自动添加 QModem 的 Build/Host deps
-# sed 或 echo 修改 Makefile 或依赖的 kmod
+# ------------------------------------------------------------------
+echo "==> [2/4] Fix luci-app-advanced-reboot (safe guard)"
+# ------------------------------------------------------------------
 
-echo "=== Step 6: All DIY packages ready ==="
-ls -l $DIYPATH
+ADV_REBOOT_MK="$OPENWRT_DIR/package/feeds/luci/luci-app-advanced-reboot/Makefile"
+
+if [ -f "$ADV_REBOOT_MK" ]; then
+  sed -i '/jq\/host/d' "$ADV_REBOOT_MK"
+else
+  echo "INFO: luci-app-advanced-reboot not present, skip"
+fi
+
+# ------------------------------------------------------------------
+echo "==> [3/4] Add extra packages"
+# ------------------------------------------------------------------
+
+cd "$DIYPATH"
+
+[ -d adguardhome ] || \
+  git clone --depth=1 https://github.com/rufengsuixing/luci-app-adguardhome.git adguardhome
+
+[ -d ttyd ] || \
+  git clone --depth=1 https://github.com/tsl0922/ttyd.git ttyd
+
+[ -d luci-theme-argon ] || \
+  git clone --depth=1 https://github.com/jerrykuku/luci-theme-argon.git luci-theme-argon
+
+# ------------------------------------------------------------------
+echo "==> [4/4] Register diypath feed (idempotent)"
+# ------------------------------------------------------------------
+
+FEEDS_CONF="$OPENWRT_DIR/feeds.conf.default"
+
+if ! grep -qxF "src-link diypath $DIYPATH" "$FEEDS_CONF"; then
+  echo "src-link diypath $DIYPATH" >> "$FEEDS_CONF"
+fi
+
+ls -l "$DIYPATH"
+
+echo "==> DIY script done"
