@@ -1,4 +1,4 @@
-name: Check DTS Compile (ipq807x)
+name: Check DTS Compile
 
 on:
   workflow_dispatch:
