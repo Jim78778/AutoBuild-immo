@@ -33,11 +33,13 @@ jobs:
         echo "Using DTS: $DTS"
         ls -l "$DTS"
 
-        dtc -I dts -O dtb \
+        dtc -Wno-unit_address_vs_reg -Wno-avoid_unnecessary_addr_size \
+        -I dts -O dtb \
         -i target/linux/qualcommax/files/arch/arm64/boot/dts \
         -i target/linux/qualcommax/files/arch/arm64/boot/dts/qcom \
-        "$DTS" \
+        target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/ipq8071-s10.dts \
         -o /tmp/ipq8071-s10.dtb
+
 
         ls -lh /tmp/ipq8071-s10.dtb
         echo "DTS compile OK"
