@@ -1,18 +1,18 @@
-name: Check DTS compile (swaiot CPE-S10)
+name: Check DTS compile (swaiot S10)
 
 on:
   workflow_dispatch:
   push:
     paths:
-      - "target/linux/**.dts"
-      - "target/linux/**.dtsi"
+      - "target/linux/qualcommax/files/arch/arm64/boot/dts/**/*.dts"
+      - "target/linux/qualcommax/files/arch/arm64/boot/dts/**/*.dtsi"
 
 jobs:
   check-dts:
     runs-on: ubuntu-22.04
 
     steps:
-    - name: Checkout OpenWrt source
+    - name: Checkout source
       uses: actions/checkout@v4
       with:
         repository: Jim78778/openwrt-ipq
@@ -24,18 +24,19 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y device-tree-compiler
 
-    - name: Compile swaiot CPE-S10 DTS
+    - name: Compile swaiot S10 DTS
       run: |
-        set -e
+        set -eux
 
-        DTS=target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/ipq807x-swaiot_cpe_s10.dts
+        DTS=target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/ipq8071-s10.dts
 
         echo "Using DTS: $DTS"
-        test -f "$DTS"
+        ls -l "$DTS"
 
         dtc -I dts -O dtb \
           -i target/linux/qualcommax/files \
           "$DTS" \
-          -o /tmp/swaiot_cpe_s10.dtb
+          -o /tmp/ipq8071-s10.dtb
 
         echo "DTS compile OK"
+
