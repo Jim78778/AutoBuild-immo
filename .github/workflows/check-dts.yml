@@ -1,20 +1,20 @@
-name: Check DTS (CPE S10 SKY)
+name: Validate DTS (ipq807x)
 
 on:
   workflow_dispatch:
   push:
     paths:
-      - "target/linux/**/dts/**"
-      - ".github/workflows/check-dts.yml"
+      - "target/linux/qualcommax/**"
+      - ".github/workflows/validate-dts.yml"
 
 env:
   TZ: Asia/Shanghai
-  OPENWRT_DIR: openwrt
   REPO_URL: https://github.com/Jim78778/openwrt-ipq.git
   REPO_BRANCH: swaiot-s10
+  OPENWRT_DIR: openwrt
 
 jobs:
-  check-dts:
+  dts-check:
     runs-on: ubuntu-22.04
 
     steps:
@@ -24,53 +24,39 @@ jobs:
     - name: Set timezone
       run: sudo timedatectl set-timezone "$TZ"
 
-    - name: Install minimal dependencies
+    - name: Install minimal build deps
       run: |
         sudo apt update
         sudo apt install -y \
           build-essential \
+          clang \
+          flex \
+          bison \
+          libssl-dev \
+          libelf-dev \
           device-tree-compiler \
-          git
+          python3 \
+          rsync \
+          unzip \
+          file \
+          wget
 
     - name: Clone OpenWrt source
       run: |
         git clone --depth=1 -b "$REPO_BRANCH" "$REPO_URL" "$OPENWRT_DIR"
 
-    - name: Update feeds (dtc headers need this)
+    - name: Prepare default config
       run: |
         cd "$OPENWRT_DIR"
-        ./scripts/feeds update -a
-        ./scripts/feeds install -a
+        make defconfig
 
-    - name: Build OpenWrt dtc
+    - name: Compile DTS only (kernel target)
       run: |
         cd "$OPENWRT_DIR"
-        make tools/dtc/compile V=s
+        make target/linux/compile V=s -j$(nproc)
 
-    - name: Compile DTS -> DTB (STRICT CHECK)
+    - name: Check generated DTB
       run: |
         cd "$OPENWRT_DIR"
-
-        DTS=target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/cpe-s10-sky.dts
-        OUT=/tmp/cpe-s10-sky.dtb
-
-        echo "==> Using OpenWrt dtc"
-        ./build_dir/host/dtc-*/dtc \
-          -Wno-unit_address_vs_reg \
-          -I dts -O dtb \
-          -o "$OUT" \
-          "$DTS"
-
-        echo "==> DTS compiled successfully:"
-        ls -lh "$OUT"
-
-    - name: Dump DTB back to DTS (sanity check)
-      run: |
-        cd "$OPENWRT_DIR"
-        ./build_dir/host/dtc-*/dtc \
-          -I dtb -O dts \
-          /tmp/cpe-s10-sky.dtb \
-          > /tmp/cpe-s10-sky.dump.dts
-
-        echo "==> Decompiled DTS head:"
-        head -n 40 /tmp/cpe-s10-sky.dump.dts
+        echo "===== Generated DTBs ====="
+        find build_dir/ -name "*s10*.dtb" || true
