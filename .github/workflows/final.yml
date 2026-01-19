@@ -1,0 +1,73 @@
+name: Merge + Clean Config
+
+on:
+  workflow_dispatch:
+
+env:
+  TZ: Asia/Shanghai
+  OPENWRT_DIR: openwrt
+
+jobs:
+  config:
+    runs-on: ubuntu-22.04
+
+    steps:
+    - name: Checkout Repo
+      uses: actions/checkout@v4
+
+    - name: Prepare OpenWrt dir
+      run: mkdir -p $OPENWRT_DIR
+
+    - name: Copy OpenWrt source
+      run: cp -r . $OPENWRT_DIR
+
+    # ---- 合并 config ----
+    - name: Merge ci.config + .config
+      run: |
+        cd $OPENWRT_DIR
+
+        cp $GITHUB_WORKSPACE/ci.config .config.ci
+        cp $GITHUB_WORKSPACE/.config .config.main
+
+        # 使用 merge_config.sh 自动合并
+        if [ ! -f ./scripts/kconfig/merge_config.sh ]; then
+          echo "merge_config.sh not found, fetching from OpenWrt repo..."
+          curl -fsSL https://raw.githubusercontent.com/openwrt/openwrt/master/scripts/kconfig/merge_config.sh -o ./scripts/kconfig/merge_config.sh
+          chmod +x ./scripts/kconfig/merge_config.sh
+        fi
+
+        ./scripts/kconfig/merge_config.sh .config.main .config.ci
+        make defconfig
+
+    # ---- 清洗 config ----
+    - name: Clean final config
+      run: |
+        cd $OPENWRT_DIR
+
+        # 删除重复空行、去掉无效注释
+        sed -i '/^#.*$/d' .config
+        sed -i '/^$/d' .config
+
+        # 输出启用包数量
+        echo "==== Enabled packages count ===="
+        grep -c '^CONFIG_PACKAGE_.*=y' .config
+
+        # 输出目标信息
+        echo "==== Target ===="
+        grep '^CONFIG_TARGET_' .config
+
+    # ---- 生成 diff ----
+    - name: Generate config diff
+      run: |
+        cd $OPENWRT_DIR
+        diff -u .config.main .config > config.diff || true
+        cat config.diff
+
+    # ---- 上传 artifact ----
+    - name: Upload final config + diff
+      uses: actions/upload-artifact@v4
+      with:
+        name: final-config
+        path: |
+          $OPENWRT_DIR/.config
+          $OPENWRT_DIR/config.diff
