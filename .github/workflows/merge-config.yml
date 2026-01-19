@@ -1,4 +1,4 @@
-name: Merge OpenWrt Config
+name: Merge OpenWrt Config (robust)
 
 on:
   workflow_dispatch:
@@ -12,19 +12,27 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      # 2️⃣ 拉取 OpenWrt 源码（只为拿 merge_config.sh）
+      # 2️⃣ 获取官方 merge_config.sh（来自 Linux kernel）
+      - name: Fetch merge_config.sh
+        run: |
+          mkdir -p tools
+          curl -fsSL \
+            https://raw.githubusercontent.com/torvalds/linux/master/scripts/kconfig/merge_config.sh \
+            -o tools/merge_config.sh
+          chmod +x tools/merge_config.sh
+
+      # 3️⃣ 校验 config 是否存在
+      - name: Verify config files
+        run: |
+          test -f .config || (echo ".config not found" && exit 1)
+          test -f ci.config || (echo "ci.config not found" && exit 1)
+
+      # 4️⃣ 拉取 OpenWrt 源码（只用于 defconfig）
       - name: Clone OpenWrt source
         run: |
           git clone --depth=1 https://github.com/openwrt/openwrt.git openwrt
 
-      # 3️⃣ 检查两份 config 是否存在
-      - name: Verify config files
-        run: |
-          ls -l
-          test -f .config || (echo ".config not found" && exit 1)
-          test -f ci.config || (echo "ci.config not found" && exit 1)
-
-      # 4️⃣ 合并 config（.config 为主，ci.config 补充）
+      # 5️⃣ 合并 config（.config 为主）
       - name: Merge configs
         run: |
           cd openwrt
@@ -32,14 +40,14 @@ jobs:
           cp ../.config .config.main
           cp ../ci.config .config.ci
 
-          ./scripts/kconfig/merge_config.sh \
+          bash ../tools/merge_config.sh \
             .config.main \
             .config.ci
 
           make defconfig
 
-      # 5️⃣ 展示结果
-      - name: Show merged result
+      # 6️⃣ 显示结果
+      - name: Show merged config info
         run: |
           cd openwrt
           echo "===== TARGET ====="
@@ -48,10 +56,11 @@ jobs:
           echo "===== PACKAGE COUNT ====="
           grep -E '^CONFIG_PACKAGE_.*=(y|m)' .config | wc -l
 
-      # 6️⃣ 保存最终 config
+      # 7️⃣ 上传最终 config
       - name: Upload merged config
         uses: actions/upload-artifact@v4
         with:
           name: merged-openwrt-config
           path: openwrt/.config
           retention-days: 30
+
