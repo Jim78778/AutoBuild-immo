@@ -36,7 +36,7 @@ jobs:
 
       # 4️⃣ Optional: save as artifact
       - name: Upload package list
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: enabled-packages
           path: enabled_packages.txt
