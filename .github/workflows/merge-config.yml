@@ -1,0 +1,57 @@
+name: Merge OpenWrt Config
+
+on:
+  workflow_dispatch:
+
+jobs:
+  merge-config:
+    runs-on: ubuntu-22.04
+
+    steps:
+      # 1️⃣ Checkout AutoBuild-immo
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      # 2️⃣ 拉取 OpenWrt 源码（只为拿 merge_config.sh）
+      - name: Clone OpenWrt source
+        run: |
+          git clone --depth=1 https://github.com/openwrt/openwrt.git openwrt
+
+      # 3️⃣ 检查两份 config 是否存在
+      - name: Verify config files
+        run: |
+          ls -l
+          test -f .config || (echo ".config not found" && exit 1)
+          test -f ci.config || (echo "ci.config not found" && exit 1)
+
+      # 4️⃣ 合并 config（.config 为主，ci.config 补充）
+      - name: Merge configs
+        run: |
+          cd openwrt
+
+          cp ../.config .config.main
+          cp ../ci.config .config.ci
+
+          ./scripts/kconfig/merge_config.sh \
+            .config.main \
+            .config.ci
+
+          make defconfig
+
+      # 5️⃣ 展示结果
+      - name: Show merged result
+        run: |
+          cd openwrt
+          echo "===== TARGET ====="
+          grep '^CONFIG_TARGET_' .config
+          echo
+          echo "===== PACKAGE COUNT ====="
+          grep -E '^CONFIG_PACKAGE_.*=(y|m)' .config | wc -l
+
+      # 6️⃣ 保存最终 config
+      - name: Upload merged config
+        uses: actions/upload-artifact@v4
+        with:
+          name: merged-openwrt-config
+          path: openwrt/.config
+          retention-days: 30
