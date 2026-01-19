@@ -34,9 +34,10 @@ jobs:
         ls -l "$DTS"
 
         dtc -I dts -O dtb \
-          -i target/linux/qualcommax/files \
-          "$DTS" \
-          -o /tmp/ipq8071-s10.dtb
+        -i target/linux/qualcommax/files/arch/arm64/boot/dts \
+        -i target/linux/qualcommax/files/arch/arm64/boot/dts/qcom \
+        "$DTS" \
+        -o /tmp/ipq8071-s10.dtb
 
+        ls -lh /tmp/ipq8071-s10.dtb
         echo "DTS compile OK"
-
