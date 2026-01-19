@@ -1,4 +1,4 @@
-name: Merge + Clean Config
+name: Merge + Clean Config + Upload
 
 on:
   workflow_dispatch:
@@ -15,23 +15,21 @@ jobs:
     - name: Checkout Repo
       uses: actions/checkout@v4
 
-    - name: Prepare OpenWrt dir
-      run: mkdir -p $OPENWRT_DIR
-
-    - name: Copy OpenWrt source
-      run: cp -r . $OPENWRT_DIR
+    # ---- 复制 config 文件，不拷贝整个仓库 ----
+    - name: Prepare configs
+      run: |
+        mkdir -p $OPENWRT_DIR
+        cp $GITHUB_WORKSPACE/.config $OPENWRT_DIR/.config.main
+        cp $GITHUB_WORKSPACE/ci.config $OPENWRT_DIR/.config.ci
 
     # ---- 合并 config ----
-    - name: Merge ci.config + .config
+    - name: Merge configs
       run: |
         cd $OPENWRT_DIR
 
-        cp $GITHUB_WORKSPACE/ci.config .config.ci
-        cp $GITHUB_WORKSPACE/.config .config.main
-
-        # 使用 merge_config.sh 自动合并
+        # 如果 merge_config.sh 不存在就下载
         if [ ! -f ./scripts/kconfig/merge_config.sh ]; then
-          echo "merge_config.sh not found, fetching from OpenWrt repo..."
+          mkdir -p ./scripts/kconfig
           curl -fsSL https://raw.githubusercontent.com/openwrt/openwrt/master/scripts/kconfig/merge_config.sh -o ./scripts/kconfig/merge_config.sh
           chmod +x ./scripts/kconfig/merge_config.sh
         fi
@@ -43,16 +41,12 @@ jobs:
     - name: Clean final config
       run: |
         cd $OPENWRT_DIR
-
-        # 删除重复空行、去掉无效注释
         sed -i '/^#.*$/d' .config
         sed -i '/^$/d' .config
 
-        # 输出启用包数量
         echo "==== Enabled packages count ===="
         grep -c '^CONFIG_PACKAGE_.*=y' .config
 
-        # 输出目标信息
         echo "==== Target ===="
         grep '^CONFIG_TARGET_' .config
 
