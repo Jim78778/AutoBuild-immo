@@ -1,66 +1,78 @@
-name: Merge OpenWrt Config (robust)
+name: Build Swaiot CPE-S10 (Merged Config)
 
 on:
   workflow_dispatch:
 
+env:
+  TZ: Asia/Shanghai
+  OPENWRT_DIR: openwrt
+
 jobs:
-  merge-config:
+  build:
     runs-on: ubuntu-22.04
 
     steps:
-      # 1️⃣ Checkout AutoBuild-immo
-      - name: Checkout repo
-        uses: actions/checkout@v4
+    - name: Checkout AutoBuild repo
+      uses: actions/checkout@v4
 
-      # 2️⃣ 获取官方 merge_config.sh（来自 Linux kernel）
-      - name: Fetch merge_config.sh
-        run: |
-          mkdir -p tools
-          curl -fsSL \
-            https://raw.githubusercontent.com/torvalds/linux/master/scripts/kconfig/merge_config.sh \
-            -o tools/merge_config.sh
-          chmod +x tools/merge_config.sh
+    - name: Show system info
+      run: |
+        echo "CPU:" && nproc
+        echo "Memory:" && free -h
+        echo "Disk:" && df -h
 
-      # 3️⃣ 校验 config 是否存在
-      - name: Verify config files
-        run: |
-          test -f .config || (echo ".config not found" && exit 1)
-          test -f ci.config || (echo "ci.config not found" && exit 1)
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          build-essential clang flex bison g++ gawk gcc-multilib \
+          gettext git libncurses-dev libssl-dev python3-distutils \
+          rsync unzip zlib1g-dev file wget
 
-      # 4️⃣ 拉取 OpenWrt 源码（只用于 defconfig）
-      - name: Clone OpenWrt source
-        run: |
-          git clone --depth=1 https://github.com/openwrt/openwrt.git openwrt
+    - name: Clone OpenWrt source
+      run: |
+        git clone -b swaiot-s10 https://github.com/Jim78778/openwrt-ipq.git $OPENWRT_DIR
 
-      # 5️⃣ 合并 config（.config 为主）
-      - name: Merge configs
-        run: |
-          cd openwrt
+    - name: Update & install feeds
+      run: |
+        cd $OPENWRT_DIR
+        ./scripts/feeds update -a
+        ./scripts/feeds install -a
 
-          cp ../.config .config.main
-          cp ../ci.config .config.ci
+    - name: Merge ci.config + .config
+      run: |
+        cd $OPENWRT_DIR
 
-          bash ../tools/merge_config.sh \
-            .config.main \
-            .config.ci
+        echo "==> Copy ci.config as base"
+        cp $GITHUB_WORKSPACE/ci.config .config
 
-          make defconfig
+        echo "==> Append main .config (override)"
+        cat $GITHUB_WORKSPACE/.config >> .config
 
-      # 6️⃣ 显示结果
-      - name: Show merged config info
-        run: |
-          cd openwrt
-          echo "===== TARGET ====="
-          grep '^CONFIG_TARGET_' .config
-          echo
-          echo "===== PACKAGE COUNT ====="
-          grep -E '^CONFIG_PACKAGE_.*=(y|m)' .config | wc -l
+        echo "==> Normalize config"
+        make defconfig
 
-      # 7️⃣ 上传最终 config
-      - name: Upload merged config
-        uses: actions/upload-artifact@v4
-        with:
-          name: merged-openwrt-config
-          path: openwrt/.config
-          retention-days: 30
+    - name: Show final config summary
+      run: |
+        cd $OPENWRT_DIR
+        echo "==== Enabled packages count ===="
+        grep -c '^CONFIG_PACKAGE_.*=y' .config
+        echo "==== Target ===="
+        grep '^CONFIG_TARGET_' .config
 
+    - name: Upload final .config
+      uses: actions/upload-artifact@v4
+      with:
+        name: final-config
+        path: openwrt/.config
+
+    - name: Compile firmware
+      run: |
+        cd $OPENWRT_DIR
+        make -j$(nproc) || make -j1 V=s
+
+    - name: Upload firmware
+      uses: actions/upload-artifact@v4
+      with:
+        name: firmware
+        path: openwrt/bin/targets
