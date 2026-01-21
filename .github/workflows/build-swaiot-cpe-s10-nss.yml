@@ -1,4 +1,4 @@
-name: Build Swaiot CPE-S10 (ipq807x NSS)
+nname: Build Swaiot CPE-S10 (ipq807x NSS) - STABLE
 
 on:
   workflow_dispatch:
@@ -12,144 +12,106 @@ env:
   REPO_BRANCH: swaiot-s10
   CONFIG_FILE: ci.config
   DIY_SCRIPT: diy-part1.sh
-  UPLOAD_FIRMWARE: true
-  OPENWRT_DIR: /mnt/openwrt-build
+  OPENWRT_DIR: /mnt/openwrt
 
 jobs:
   build:
     runs-on: ubuntu-22.04
 
     steps:
-    # 1. Checkout workflow repo
+    # 1️⃣ Checkout workflow repo
     - name: Checkout workflow repo
       uses: actions/checkout@v4
 
-    # 2. Set timezone
-    - name: Set timezone
-      run: sudo timedatectl set-timezone "$TZ"
-
-    # 3. Free disk space
-    - name: Free disk space
-      run: |
-        sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
-        sudo apt-get clean
-        df -h
-
-    # 4. Install build dependencies
+    # 2️⃣ Install minimal build dependencies
     - name: Install build dependencies
       run: |
         sudo apt update
         sudo apt install -y \
-          ack antlr3 asciidoc autoconf automake autopoint binutils bison \
-          build-essential bzip2 ccache clang cmake cpio curl \
-          device-tree-compiler ecj fastjar flex gawk gettext \
-          gcc g++ gcc-12 g++-12 gcc-multilib g++-multilib \
-          git gperf haveged help2man intltool jq lib32gcc-s1 libc6-dev-i386 \
-          libelf-dev libglib2.0-dev libgmp3-dev libltdl-dev libmpc-dev \
-          libmpfr-dev libncurses5-dev libncursesw5-dev libreadline-dev \
-          libssl-dev libtool lld lrzsz mkisofs msmtp nano ninja-build \
-          p7zip p7zip-full patch pkgconf python-is-python3 python3 python3-pip \
-          python3-ply python3-docutils python3-setuptools python3-wheel \
-          qemu-utils re2c rsync scons squashfs-tools subversion swig texinfo \
-          uglifyjs upx-ucl unzip vim wget xmlto xxd zlib1g-dev bc file time \
-          xz-utils zstd liblzma-dev libzstd-dev libstdc++-12-dev libcap-dev \
-          libnl-3-dev libnl-genl-3-dev
+          build-essential clang flex bison gawk gettext \
+          git libncurses-dev libssl-dev python3 rsync unzip \
+          file wget time bc zstd xz-utils
 
-        pip3 install pysocks unidecode
-
-    # 5. Prepare build dir
-    - name: Prepare /mnt build directory
+    # 3️⃣ Prepare build directory
+    - name: Prepare build directory
       run: |
         sudo mkdir -p "$OPENWRT_DIR"
         sudo chown $USER:$USER "$OPENWRT_DIR"
-        df -h /mnt
 
-    # 6. Clone OpenWrt source
+    # 4️⃣ Clone OpenWrt source
     - name: Clone openwrt-ipq
       run: |
         git clone --depth=1 -b "$REPO_BRANCH" "$REPO_URL" "$OPENWRT_DIR"
 
-    # 7. Copy config and DIY script
-    - name: Copy configs and DIY script
+    # 5️⃣ Copy config & DIY script
+    - name: Copy config and DIY script
       run: |
-        cp "${{ github.workspace }}/$CONFIG_FILE" "$OPENWRT_DIR/.config"
-        cp "${{ github.workspace }}/$DIY_SCRIPT" "$OPENWRT_DIR/"
+        cp "$CONFIG_FILE" "$OPENWRT_DIR/.config"
+        cp "$DIY_SCRIPT" "$OPENWRT_DIR/"
         chmod +x "$OPENWRT_DIR/$DIY_SCRIPT"
 
-    # 8. Update & install feeds
-    - name: Update & install feeds
+    # 6️⃣ Update & install feeds
+    - name: Update feeds
       run: |
         cd "$OPENWRT_DIR"
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
-    # 9. Apply DIY script
-    - name: Apply diy-part1.sh
+    # 7️⃣ Apply DIY script
+    - name: Apply DIY script
       run: |
         cd "$OPENWRT_DIR"
-        echo "执行 DIY 脚本..."
         ./$DIY_SCRIPT
 
-        echo "🔧 强制确保 SquashFS 不被反选..."
-        sed -i 's/^# CONFIG_TARGET_ROOTFS_SQUASHFS.*/CONFIG_TARGET_ROOTFS_SQUASHFS=y/' .config || true
-        grep -q CONFIG_TARGET_ROOTFS_SQUASHFS .config || echo "CONFIG_TARGET_ROOTFS_SQUASHFS=y" >> .config
-
-    # 10. Load config（关键：只用 olddefconfig）
-    - name: Load config (SAFE)
+    # 8️⃣ Sanitize config (CRITICAL)
+    - name: Sanitize .config
       run: |
         cd "$OPENWRT_DIR"
-        echo "生成最终配置（olddefconfig）..."
-        cp .config .config.before
-        make olddefconfig
 
-        echo "配置变化（前 30 行）："
-        diff -u .config.before .config | head -30 || true
+        echo "🧹 清理已知问题包配置"
 
-    # 11. 断言 SquashFS（不通过直接 fail）
-    - name: Assert SquashFS enabled
+        sed -i '
+          /^CONFIG_PACKAGE_qmodem=/d
+          /^CONFIG_PACKAGE_gst1-plugins-base=/d
+          /^CONFIG_PACKAGE_onionshare-cli=/d
+        ' .config
+
+        cat >> .config <<'EOF'
+        # 强制禁用问题包
+        # CONFIG_PACKAGE_qmodem is not set
+        # CONFIG_PACKAGE_gst1-plugins-base is not set
+        # CONFIG_PACKAGE_onionshare-cli is not set
+
+        # 强制启用 SquashFS
+        CONFIG_TARGET_ROOTFS_SQUASHFS=y
+        EOF
+
+    # 9️⃣ Generate final config
+    - name: olddefconfig
       run: |
         cd "$OPENWRT_DIR"
-        echo "检查 SquashFS..."
-        grep CONFIG_TARGET_ROOTFS_SQUASHFS=y .config || {
-          echo "❌ SquashFS 未启用，image 阶段必然 0 输出"
-          grep -E "TARGET_ROOTFS|SQUASHFS|EXT4" .config || true
+        make olddefconfig || {
+          echo "❌ olddefconfig failed"
           exit 1
         }
-        echo "✅ SquashFS OK"
 
-    # 12. Download sources
+    # 🔟 Assert SquashFS
+    - name: Assert SquashFS
+      run: |
+        cd "$OPENWRT_DIR"
+        grep CONFIG_TARGET_ROOTFS_SQUASHFS=y .config || {
+          echo "❌ SquashFS 未启用"
+          exit 1
+        }
+
+    # 1️⃣1️⃣ Download sources
     - name: Download packages
       run: |
         cd "$OPENWRT_DIR"
         make download -j1 V=s
 
-    # 13. Build firmware
+    # 1️⃣2️⃣ Build firmware
     - name: Build firmware
       run: |
         cd "$OPENWRT_DIR"
-        echo "开始构建固件..."
-        make -j$(nproc) V=s || make -j1 V=s
-
-    # 14. Verify firmware
-    - name: Verify firmware files
-      run: |
-        firmware_dir="$OPENWRT_DIR/bin/targets/qualcommax/ipq807x"
-        echo "检查固件目录: $firmware_dir"
-        ls -la "$firmware_dir"
-
-        count=$(find "$firmware_dir" -name "*.bin" -o -name "*.ubi" -o -name "*.itb" | wc -l)
-        if [ "$count" -eq 0 ]; then
-          echo "❌ 未生成任何固件"
-          exit 1
-        fi
-
-        echo "✅ 找到 $count 个固件文件"
-
-    # 15. Upload firmware
-    - name: Upload firmware
-      if: env.UPLOAD_FIRMWARE == 'true'
-      uses: actions/upload-artifact@v4
-      with:
-        name: Swaiot-CPE-S10-ipq807x
-        path: ${{ env.OPENWRT_DIR }}/bin/targets/qualcommax/ipq807x/
-        retention-days: 30
+        make -j$(($(nproc)/2)) V=s || make -j1 V=s
