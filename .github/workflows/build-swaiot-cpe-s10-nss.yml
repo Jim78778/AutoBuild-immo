@@ -35,7 +35,7 @@ jobs:
         sudo apt-get clean
         df -h
 
-    # 4. Install build dependencies + NSS host deps
+    # 4. Install build dependencies
     - name: Install build dependencies
       run: |
         sudo apt update
@@ -55,22 +55,21 @@ jobs:
           xz-utils zstd liblzma-dev libzstd-dev libstdc++-12-dev libcap-dev \
           libnl-3-dev libnl-genl-3-dev
 
-        # 安装 NSS 缺失的主机依赖
         pip3 install pysocks unidecode
 
-    # 5. Prepare /mnt build directory
+    # 5. Prepare build dir
     - name: Prepare /mnt build directory
       run: |
         sudo mkdir -p "$OPENWRT_DIR"
         sudo chown $USER:$USER "$OPENWRT_DIR"
         df -h /mnt
 
-    # 6. Clone openwrt-ipq source
+    # 6. Clone OpenWrt source
     - name: Clone openwrt-ipq
       run: |
         git clone --depth=1 -b "$REPO_BRANCH" "$REPO_URL" "$OPENWRT_DIR"
 
-    # 7. Copy ci.config and diy script
+    # 7. Copy config and DIY script
     - name: Copy configs and DIY script
       run: |
         cp "${{ github.workspace }}/$CONFIG_FILE" "$OPENWRT_DIR/.config"
@@ -82,214 +81,75 @@ jobs:
       run: |
         cd "$OPENWRT_DIR"
         ./scripts/feeds update -a
-        ./scripts/feeds install -a -f -p qmodem
+        ./scripts/feeds install -a
 
-    # 9. 关键：明确 NSS 配置模式
-    - name: Configure NSS mode
-      run: |
-        cd "$OPENWRT_DIR"
-        
-        echo "========================================="
-        echo "  🎯 明确 NSS 配置模式"
-        echo "========================================="
-        
-        # 检查当前配置
-        echo "当前 .config 中的 NSS 相关配置:"
-        grep -E "CONFIG_PACKAGE.*NSS|CONFIG_PACKAGE.*nss" .config || echo "未找到 NSS 配置"
-        
-        echo ""
-        echo "📋 NSS 模式说明:"
-        echo "1. WWAN-only NSS: NSS 仅处理蜂窝网络加速"
-        echo "2. WiFi NSS: NSS 处理 WiFi 加速 (与 mac80211 冲突)"
-        echo "3. 全功能 NSS: 包含所有 NSS 模块"
-        echo ""
-        echo "⚠️ 重要: WiFi NSS 与 mac80211 无线驱动不兼容"
-        echo "如果选择 WiFi NSS，必须禁用 mac80211"
-        
-        # 根据 diy-part1.sh 内容决定配置
-        echo ""
-        echo "检查 DIY 脚本内容..."
-        if grep -q "精简 NSS.*只保留 WWAN" "$DIY_SCRIPT"; then
-          echo "✅ DIY 脚本配置: WWAN-only NSS"
-        elif grep -q "精简 NSS.*只保留 WiFi" "$DIY_SCRIPT"; then
-          echo "✅ DIY 脚本配置: WiFi NSS"
-          echo "⚠️ 警告: WiFi NSS 可能与 mac80211 冲突"
-        else
-          echo "ℹ️ DIY 脚本未明确指定 NSS 模式"
-        fi
-
-    # 10. Apply diy-part1.sh (明确配置 NSS 模式)
+    # 9. Apply DIY script
     - name: Apply diy-part1.sh
       run: |
         cd "$OPENWRT_DIR"
-        chmod +x "$DIY_SCRIPT"
         echo "执行 DIY 脚本..."
         ./$DIY_SCRIPT
-        
-        # 检查执行后配置
-        echo ""
-        echo "DIY 脚本执行后检查:"
-        echo "1. NSS 驱动配置:"
-        grep "CONFIG_PACKAGE_kmod-qca-nss-drv" .config || echo "未找到 NSS 驱动配置"
-        
-        echo ""
-        echo "2. 无线驱动配置:"
-        grep "CONFIG_PACKAGE_kmod-mac80211\|CONFIG_PACKAGE_kmod-ath" .config || echo "未找到无线驱动配置"
-        
-        echo ""
-        echo "3. 检查冲突配置:"
-        if grep -q "CONFIG_PACKAGE_kmod-qca-nss-drv-wifi-meshmgr=y" .config && \
-           grep -q "CONFIG_PACKAGE_kmod-mac80211=y" .config; then
-          echo "❌ 检测到冲突配置: WiFi NSS 和 mac80211 同时启用"
-          echo "   这可能导致构建失败或功能异常"
-          # 可以选择在此处自动修复或报错退出
-          # exit 1
-        else
-          echo "✅ 未检测到明显配置冲突"
-        fi
 
-    # 11. Load config (安全的做法)
-    - name: Load config
+        echo "🔧 强制确保 SquashFS 不被反选..."
+        sed -i 's/^# CONFIG_TARGET_ROOTFS_SQUASHFS.*/CONFIG_TARGET_ROOTFS_SQUASHFS=y/' .config || true
+        grep -q CONFIG_TARGET_ROOTFS_SQUASHFS .config || echo "CONFIG_TARGET_ROOTFS_SQUASHFS=y" >> .config
+
+    # 10. Load config（关键：只用 olddefconfig）
+    - name: Load config (SAFE)
       run: |
         cd "$OPENWRT_DIR"
-        echo "生成最终配置..."
-        
-        # 保存配置前的状态
-        cp .config .config.before_defconfig
-        
-        # 执行 defconfig，不忽略错误
-        make defconfig
-        
-        # 比较配置变化
-        echo ""
-        echo "配置变化对比:"
-        diff -u .config.before_defconfig .config | grep -E "^[+-]" | grep -v "^---\|^+++" | head -20 || true
+        echo "生成最终配置（olddefconfig）..."
+        cp .config .config.before
+        make olddefconfig
 
-    # 12. Debug NSS config (只显示保留模块)
-    - name: Debug NSS config
+        echo "配置变化（前 30 行）："
+        diff -u .config.before .config | head -30 || true
+
+    # 11. 断言 SquashFS（不通过直接 fail）
+    - name: Assert SquashFS enabled
       run: |
         cd "$OPENWRT_DIR"
-        echo "===== 最终 NSS / qca-nss 配置 ====="
-        grep -E "CONFIG_PACKAGE.*(NSS|nss)" .config || echo "未找到 NSS 配置"
-        
-        echo ""
-        echo "===== 无线驱动配置 ====="
-        grep -E "CONFIG_PACKAGE.*(mac80211|ath)" .config || echo "未找到无线驱动配置"
-        
-        echo ""
-        echo "===== 关键依赖检查 ====="
-        echo "检查已知缺失依赖:"
-        for dep in libev libpam libtirpc liblzma libnetsnmp; do
-          if grep -q "CONFIG_PACKAGE_${dep}=y" .config; then
-            echo "  ❌ ${dep}: 已启用但可能缺失"
-          fi
-        done
+        echo "检查 SquashFS..."
+        grep CONFIG_TARGET_ROOTFS_SQUASHFS=y .config || {
+          echo "❌ SquashFS 未启用，image 阶段必然 0 输出"
+          grep -E "TARGET_ROOTFS|SQUASHFS|EXT4" .config || true
+          exit 1
+        }
+        echo "✅ SquashFS OK"
 
-    # 13. Download all sources
+    # 12. Download sources
     - name: Download packages
       run: |
         cd "$OPENWRT_DIR"
         make download -j1 V=s
 
-    # 14. Build firmware (安全方法 - 不隐藏错误)
+    # 13. Build firmware
     - name: Build firmware
       run: |
         cd "$OPENWRT_DIR"
-        
         echo "开始构建固件..."
-        echo "注意: 构建过程中会有警告，但不会隐藏错误"
-        
-        # 方法1: 直接构建，输出完整日志
-        # 使用 tee 同时输出到控制台和文件，但不过滤错误
-        build_log="$OPENWRT_DIR/build.log"
-        
-        echo "构建日志保存到: $build_log"
-        
-        # 使用函数处理构建，确保错误不会被隐藏
-        build_with_fallback() {
-          local max_jobs=$(nproc)
-          
-          # 尝试并行构建
-          echo "尝试使用 $max_jobs 个任务并行构建..."
-          if make -j$max_jobs V=s 2>&1 | tee "$build_log"; then
-            echo "✅ 并行构建成功"
-            return 0
-          else
-            echo "⚠️ 并行构建失败，尝试单线程构建..."
-            if make -j1 V=s 2>&1 | tee -a "$build_log"; then
-              echo "✅ 单线程构建成功"
-              return 0
-            else
-              echo "❌ 构建失败"
-              return 1
-            fi
-          fi
-        }
-        
-        # 执行构建
-        if ! build_with_fallback; then
-          echo ""
-          echo "========================================="
-          echo "构建失败! 可能的原因:"
-          echo "1. NSS 配置冲突"
-          echo "2. 缺失依赖"
-          echo "3. 源代码下载不完整"
-          echo ""
-          echo "查看构建日志的最后50行:"
-          tail -50 "$build_log" || true
-          exit 1
-        fi
-        
-        echo ""
-        echo "✅ 构建完成!"
+        make -j$(nproc) V=s || make -j1 V=s
 
-    # 15. 检查固件生成情况
+    # 14. Verify firmware
     - name: Verify firmware files
       run: |
-        echo "检查固件文件是否生成..."
         firmware_dir="$OPENWRT_DIR/bin/targets/qualcommax/ipq807x"
-        
-        if [ ! -d "$firmware_dir" ]; then
-          echo "❌ 固件目录不存在: $firmware_dir"
+        echo "检查固件目录: $firmware_dir"
+        ls -la "$firmware_dir"
+
+        count=$(find "$firmware_dir" -name "*.bin" -o -name "*.ubi" -o -name "*.itb" | wc -l)
+        if [ "$count" -eq 0 ]; then
+          echo "❌ 未生成任何固件"
           exit 1
         fi
-        
-        echo "✅ 固件目录存在"
-        echo "文件列表:"
-        ls -la "$firmware_dir/"
-        
-        echo ""
-        echo "关键固件文件:"
-        find "$firmware_dir" -name "*.bin" -o -name "*.ubi" -o -name "*.itb" 2>/dev/null | \
-          while read file; do
-            echo "  - $(basename "$file") ($(du -h "$file" | cut -f1))"
-          done
-        
-        # 检查是否有至少一个固件文件
-        firmware_count=$(find "$firmware_dir" -name "*.bin" -o -name "*.ubi" -o -name "*.itb" 2>/dev/null | wc -l)
-        if [ "$firmware_count" -eq 0 ]; then
-          echo "❌ 未找到任何固件文件"
-          exit 1
-        fi
-        
-        echo "✅ 找到 $firmware_count 个固件文件"
 
-    # 16. Upload build log (可选)
-    - name: Upload build log
-      if: always()  # 总是上传，无论成功失败
-      uses: actions/upload-artifact@v4
-      with:
-        name: build-log
-        path: ${{ env.OPENWRT_DIR }}/build.log
-        retention-days: 7
+        echo "✅ 找到 $count 个固件文件"
 
-    # 17. Upload firmware
+    # 15. Upload firmware
     - name: Upload firmware
       if: env.UPLOAD_FIRMWARE == 'true'
       uses: actions/upload-artifact@v4
       with:
-        name: Swaiot-CPE-S10-ipq807x-NSS
+        name: Swaiot-CPE-S10-ipq807x
         path: ${{ env.OPENWRT_DIR }}/bin/targets/qualcommax/ipq807x/
-        if-no-files-found: error
         retention-days: 30
-        compression-level: 6
