@@ -82,7 +82,7 @@ jobs:
       run: |
         cd "$OPENWRT_DIR"
         ./scripts/feeds update -a
-        ./scripts/feeds install -a
+        ./scripts/feeds install -a -f -p qmodem
 
     # 9. 关键：明确 NSS 配置模式
     - name: Configure NSS mode
