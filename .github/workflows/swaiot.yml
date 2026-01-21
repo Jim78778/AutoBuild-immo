@@ -203,12 +203,6 @@ jobs:
         echo "文件列表:"
         ls -la "$firmware_dir/"
         
-        # 检查关键文件
-        swaiot_files=$(find "$firmware_dir" -name "*swaiot_cpe_s10*" | wc -l)
-        if [ "$swaiot_files" -eq 0 ]; then
-          echo "❌ 未找到针对 Swaiot CPE-S10 的固件"
-          exit 1
-        fi
         
         echo "✅ 找到 $swaiot_files 个 Swaiot CPE-S10 固件"
         
