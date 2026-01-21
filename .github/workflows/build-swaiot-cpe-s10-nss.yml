@@ -1,4 +1,4 @@
-nname: Build Swaiot CPE-S10 (ipq807x NSS) - STABLE
+name: Build Swaiot CPE-S10 (ipq807x NSS) - STABLE
 
 on:
   workflow_dispatch:
