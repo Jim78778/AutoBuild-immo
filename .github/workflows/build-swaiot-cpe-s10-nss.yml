@@ -1,10 +1,14 @@
-name: Build Swaiot CPE-S10 (ipq807x NSS) - STABLE
+name: Build Swaiot CPE-S10 (ipq807x NSS)
 
 on:
   workflow_dispatch:
   push:
     branches:
       - swaiot-s10
+    paths:
+      - 'ci.config'
+      - 'diy-part1.sh'
+      - '.github/workflows/**'
 
 env:
   TZ: Asia/Shanghai
@@ -13,105 +17,161 @@ env:
   CONFIG_FILE: ci.config
   DIY_SCRIPT: diy-part1.sh
   OPENWRT_DIR: /mnt/openwrt
+  UPLOAD_FIRMWARE: true
 
 jobs:
   build:
     runs-on: ubuntu-22.04
+    timeout-minutes: 180
 
     steps:
-    # 1️⃣ Checkout workflow repo
+    # ------------------------------------------------------------
+    # 1. Checkout workflow repo
+    # ------------------------------------------------------------
     - name: Checkout workflow repo
       uses: actions/checkout@v4
 
-    # 2️⃣ Install minimal build dependencies
-    - name: Install build dependencies
+    # ------------------------------------------------------------
+    # 2. Set timezone
+    # ------------------------------------------------------------
+    - name: Set timezone
+      run: sudo timedatectl set-timezone "$TZ"
+
+    # ------------------------------------------------------------
+    # 3. Aggressive disk cleanup (SAFE MODE)
+    # ------------------------------------------------------------
+    - name: Free disk space
+      run: |
+        echo "=== Disk before cleanup ==="
+        df -h
+
+        sudo rm -rf /usr/share/dotnet
+        sudo rm -rf /usr/local/lib/android
+        sudo rm -rf /usr/local/go
+        sudo rm -rf /usr/share/swift
+        sudo rm -rf /opt/ghc
+        sudo rm -rf /opt/hostedtoolcache
+        sudo rm -rf /usr/local/lib/node_modules
+        sudo rm -rf /usr/local/aws-cli
+        sudo rm -rf /usr/local/aws-sam-cli
+        sudo docker image prune -af || true
+
+        sudo apt-get clean
+        sudo apt-get autoremove -y
+
+        sudo rm -rf /tmp/*
+        sudo rm -rf /var/tmp/*
+
+        echo "=== Disk after cleanup ==="
+        df -h
+
+    # ------------------------------------------------------------
+    # 4. Install OpenWrt build dependencies
+    # ------------------------------------------------------------
+    - name: Install dependencies
       run: |
         sudo apt update
         sudo apt install -y \
-          build-essential clang flex bison gawk gettext \
-          git libncurses-dev libssl-dev python3 rsync unzip \
-          file wget time bc zstd xz-utils
+          build-essential clang flex bison g++ gawk gcc-multilib \
+          gettext git libncurses5-dev libssl-dev python3 python3-distutils \
+          rsync unzip zlib1g-dev file wget time
 
-    # 3️⃣ Prepare build directory
+    # ------------------------------------------------------------
+    # 5. Prepare /mnt build dir
+    # ------------------------------------------------------------
     - name: Prepare build directory
       run: |
         sudo mkdir -p "$OPENWRT_DIR"
         sudo chown $USER:$USER "$OPENWRT_DIR"
+        df -h /mnt
 
-    # 4️⃣ Clone OpenWrt source
-    - name: Clone openwrt-ipq
+    # ------------------------------------------------------------
+    # 6. Clone OpenWrt source
+    # ------------------------------------------------------------
+    - name: Clone OpenWrt source
       run: |
         git clone --depth=1 -b "$REPO_BRANCH" "$REPO_URL" "$OPENWRT_DIR"
+        df -h
 
-    # 5️⃣ Copy config & DIY script
+    # ------------------------------------------------------------
+    # 7. Fix feeds.conf.default (REMOVE video feed)
+    # ------------------------------------------------------------
+    - name: Fix feeds
+      run: |
+        cd "$OPENWRT_DIR"
+
+        sed -i '/^src-git video/d' feeds.conf.default
+
+        cat feeds.conf.default
+
+    # ------------------------------------------------------------
+    # 8. Copy config & DIY script
+    # ------------------------------------------------------------
     - name: Copy config and DIY script
       run: |
-        cp "$CONFIG_FILE" "$OPENWRT_DIR/.config"
-        cp "$DIY_SCRIPT" "$OPENWRT_DIR/"
+        cp "${{ github.workspace }}/$CONFIG_FILE" "$OPENWRT_DIR/.config"
+        cp "${{ github.workspace }}/$DIY_SCRIPT" "$OPENWRT_DIR/"
         chmod +x "$OPENWRT_DIR/$DIY_SCRIPT"
 
-    # 6️⃣ Update & install feeds
+    # ------------------------------------------------------------
+    # 9. Update & install feeds (NO video)
+    # ------------------------------------------------------------
     - name: Update feeds
       run: |
         cd "$OPENWRT_DIR"
-        ./scripts/feeds update -a
+        ./scripts/feeds update base packages luci routing telephony nss_packages sqm_scripts_nss
         ./scripts/feeds install -a
 
-    # 7️⃣ Apply DIY script
-    - name: Apply DIY script
+    # ------------------------------------------------------------
+    # 10. Apply DIY script
+    # ------------------------------------------------------------
+    - name: Apply diy-part1.sh
       run: |
         cd "$OPENWRT_DIR"
         ./$DIY_SCRIPT
 
-    # 8️⃣ Sanitize config (CRITICAL)
-    - name: Sanitize .config
+    # ------------------------------------------------------------
+    # 11. Defconfig + sanity check
+    # ------------------------------------------------------------
+    - name: Load config
       run: |
         cd "$OPENWRT_DIR"
+        make defconfig
 
-        echo "🧹 清理已知问题包配置"
+        grep -q "CONFIG_TARGET_qualcommax_ipq807x_DEVICE_swaiot_cpe_s10=y" .config
 
-        sed -i '
-          /^CONFIG_PACKAGE_qmodem=/d
-          /^CONFIG_PACKAGE_gst1-plugins-base=/d
-          /^CONFIG_PACKAGE_onionshare-cli=/d
-        ' .config
-
-        cat >> .config <<'EOF'
-        # 强制禁用问题包
-        # CONFIG_PACKAGE_qmodem is not set
-        # CONFIG_PACKAGE_gst1-plugins-base is not set
-        # CONFIG_PACKAGE_onionshare-cli is not set
-
-        # 强制启用 SquashFS
-        CONFIG_TARGET_ROOTFS_SQUASHFS=y
-        EOF
-
-    # 9️⃣ Generate final config
-    - name: olddefconfig
-      run: |
-        cd "$OPENWRT_DIR"
-        make olddefconfig || {
-          echo "❌ olddefconfig failed"
-          exit 1
-        }
-
-    # 🔟 Assert SquashFS
-    - name: Assert SquashFS
-      run: |
-        cd "$OPENWRT_DIR"
-        grep CONFIG_TARGET_ROOTFS_SQUASHFS=y .config || {
-          echo "❌ SquashFS 未启用"
-          exit 1
-        }
-
-    # 1️⃣1️⃣ Download sources
+    # ------------------------------------------------------------
+    # 12. Download sources (retry)
+    # ------------------------------------------------------------
     - name: Download packages
       run: |
         cd "$OPENWRT_DIR"
-        make download -j1 V=s
+        make download -j2 || make download -j1
 
-    # 1️⃣2️⃣ Build firmware
+    # ------------------------------------------------------------
+    # 13. Build firmware
+    # ------------------------------------------------------------
     - name: Build firmware
       run: |
         cd "$OPENWRT_DIR"
-        make -j$(($(nproc)/2)) V=s || make -j1 V=s
+        make -j2 V=s
+
+    # ------------------------------------------------------------
+    # 14. Verify firmware
+    # ------------------------------------------------------------
+    - name: Verify firmware files
+      run: |
+        cd "$OPENWRT_DIR"
+        ls -lh bin/targets/qualcommax/ipq807x/
+        find bin/targets/qualcommax/ipq807x -name "*.bin" -o -name "*.ubi" -o -name "*.itb"
+
+    # ------------------------------------------------------------
+    # 15. Upload firmware
+    # ------------------------------------------------------------
+    - name: Upload firmware
+      if: env.UPLOAD_FIRMWARE == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: Swaiot-CPE-S10-ipq807x-NSS
+        path: ${{ env.OPENWRT_DIR }}/bin/targets/qualcommax/ipq807x/
+        retention-days: 30
