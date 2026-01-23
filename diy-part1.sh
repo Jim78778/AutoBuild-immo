@@ -79,46 +79,6 @@ echo "CONFIG_TARGET_qualcommax=y" >> "$CONFIG_FILE"
 echo "CONFIG_TARGET_qualcommax_ipq807x=y" >> "$CONFIG_FILE"
 echo "CONFIG_TARGET_qualcommax_ipq807x_DEVICE_swaiot_cpe_s10=y" >> "$CONFIG_FILE"
 
-###############################################################################
-echo "==> [4/8] NSS 源预加载（仅 WWAN + WiFi）"
-###############################################################################
-
-cd "$DL_DIR"
-
-if [ ! -d nss-packages ]; then
-    git clone --depth=1 https://github.com/qosmio/nss-packages.git
-fi
-
-cd nss-packages
-find . -maxdepth 1 -type d ! -name '.' ! -name 'wwan' ! -name 'wifi' -exec rm -rf {} +
-cd ..
-
-tar -czf nss-packages-preload.tar.gz nss-packages || true
-
-###############################################################################
-echo "==> [5/8] 强制 NSS feed 使用本地 tarball"
-###############################################################################
-
-NSS_FEED="$OPENWRT_DIR/package/feeds/nss_packages"
-
-if [ -d "$NSS_FEED" ]; then
-    find "$NSS_FEED" -name 'Makefile*' -print0 | while IFS= read -r -d '' MK; do
-        sed -i \
-          -e 's/^PKG_SOURCE_PROTO:=.*/# &/' \
-          -e "s|^PKG_SOURCE_URL:=.*|PKG_SOURCE_URL:=file://$DL_DIR|" \
-          -e 's/^PKG_SOURCE_VERSION:=.*/# &/' \
-          "$MK"
-
-        grep -q '^PKG_SOURCE:=' "$MK" || \
-          sed -i "1i PKG_SOURCE:=nss-packages-preload.tar.gz\nPKG_HASH:=skip\n" "$MK"
-    done
-fi
-
-###############################################################################
-echo "==> [6/8] DIYPATH link"
-###############################################################################
-
-ln -snf "$DL_DIR/nss-packages" "$DIYPATH/nss-packages"
 
 ###############################################################################
 echo "==> [7/8] 最终 defconfig 前校验"
