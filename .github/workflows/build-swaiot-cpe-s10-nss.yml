@@ -1,4 +1,4 @@
-name: Swaiot CPE-S10 (ipq807x NSS)
+name: Swaiot CPE-S10-SKY (ipq807x NSS)
 
 on:
   workflow_dispatch:
