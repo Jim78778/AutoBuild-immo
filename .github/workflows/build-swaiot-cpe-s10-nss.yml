@@ -154,7 +154,7 @@ jobs:
     - name: Build firmware
       run: |
         cd "$OPENWRT_DIR"
-        make -j2 V=s
+        make -j1 V=s
 
     # ------------------------------------------------------------
     # 14. Verify firmware
