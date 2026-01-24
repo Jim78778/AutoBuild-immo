@@ -84,30 +84,7 @@ jobs:
         ./scripts/feeds update base packages luci routing telephony nss_packages sqm_scripts_nss qmodem
         ./scripts/feeds install -a
     
-    # 8.5 Pin qca-nss-ecm to known-good commit 30fbfa4
-    - name: Pin qca-nss-ecm to 30fbfa4
-      run: |
-        cd "$OPENWRT_DIR"
-
-        ECM_DIR="feeds/nss_packages/qca-nss-ecm"
-
-        if [ ! -d "$ECM_DIR/.git" ]; then
-          echo "❌ qca-nss-ecm not found or not a git repo"
-          exit 1
-        fi
-
-        cd "$ECM_DIR"
-
-        echo "Current qca-nss-ecm commit:"
-        git rev-parse --short HEAD
-
-        echo "Pinning qca-nss-ecm to 30fbfa4 ..."
-        git fetch origin
-        git checkout 30fbfa4
-
-        echo "Pinned qca-nss-ecm commit:"
-        git rev-parse --short HEAD
-
+    
     # 9. Apply diy-part1.sh
     - name: Apply diy-part1.sh
       run: |
