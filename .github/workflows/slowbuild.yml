@@ -123,11 +123,13 @@ jobs:
     ##########################################################################
     # 7. Copy config & DIY script
     ##########################################################################
-    - name: Load config and DIY script
+    - name: Copy config and diy script
       run: |
-        cp "$GITHUB_WORKSPACE/$CONFIG_FILE" "$OPENWRT_DIR/.config"
-        cp "$GITHUB_WORKSPACE/$DIY_SCRIPT" "$OPENWRT_DIR/"
-        chmod +x "$OPENWRT_DIR/$DIY_SCRIPT"
+        ls -lah $GITHUB_WORKSPACE
+        cp ci.config "$OPENWRT_DIR/.config"
+        cp diy-part1.sh "$OPENWRT_DIR/"
+        chmod +x "$OPENWRT_DIR/diy-part1.sh"
+
 
     ##########################################################################
     # 8. Update & install feeds（明确 feeds）
