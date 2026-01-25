@@ -9,11 +9,11 @@ on:
 env:
   TZ: Asia/Shanghai
 
-  # Source
+  # OpenWrt source
   REPO_URL: https://github.com/Jim78778/openwrt-ipq.git
   REPO_BRANCH: swaiot-s10
 
-  # Build config (来自 AutoBuild-immo 仓库)
+  # Build config (来自 workflow 仓库本身)
   CONFIG_FILE: ci.config
   DIY_SCRIPT: diy-part1.sh
 
@@ -29,9 +29,9 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-   
+
     ##########################################################################
-    # 1. Merge disk space（必须在 apt / clone 之前）
+    # 1. Maximize disk space（必须最先）
     ##########################################################################
     - name: Maximize build space
       uses: easimon/maximize-build-space@master
@@ -40,25 +40,25 @@ jobs:
         temp-reserve-mb: 100
         root-reserve-mb: 1024
 
-     ##########################################################################
-    # 2. Checkout workflow repo（非常关键：否则 ci.config 不存在）
+    ##########################################################################
+    # 2. Checkout workflow repo（ci.config / diy-part1.sh 在这里）
     ##########################################################################
     - name: Checkout workflow repo
       uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
 
-    
     ##########################################################################
-    # 3. Show system info（对齐模板，方便排错）
+    # 3. System info（方便排错）
     ##########################################################################
     - name: Check system info
       run: |
         echo "CPU cores: $(nproc)"
-        cat /proc/cpuinfo | grep -m1 "model name" || true
         free -h
         df -hT
 
     ##########################################################################
-    # 4. Init environment（重清理，防止爆盘）
+    # 4. Init build environment
     ##########################################################################
     - name: Init build environment
       env:
@@ -92,7 +92,6 @@ jobs:
         sudo apt-get autoremove -y
         sudo apt-get clean
 
-        # feeds 里 python host 工具
         pip3 install pysocks unidecode
 
     ##########################################################################
@@ -118,19 +117,8 @@ jobs:
         echo "COMMIT_MESSAGE=$(git show -s --format='Message: %s')" >> $GITHUB_ENV
         echo "COMMIT_HASH=$(git show -s --format='Hash: %H')" >> $GITHUB_ENV
 
-    - name: Force build dirs to /mnt
-      run: |
-        cd "$OPENWRT_DIR"
-
-        cat >> .config << 'EOF'
-        CONFIG_BUILD_DIR="/mnt/openwrt-build/build_dir"
-        CONFIG_STAGING_DIR="/mnt/openwrt-build/staging_dir"
-        CONFIG_DOWNLOAD_FOLDER="/mnt/openwrt-build/dl"
-        EOF
-
-    
     ##########################################################################
-    # 7. Copy config & DIY script（已修复路径问题）
+    # 7. Copy config & DIY script（先 copy，再补 config）
     ##########################################################################
     - name: Copy config and diy script
       run: |
@@ -145,16 +133,37 @@ jobs:
         chmod +x "$OPENWRT_DIR/$DIY_SCRIPT"
 
     ##########################################################################
-    # 8. Update & install feeds
+    # 7.1 Force build dirs to /mnt（不会再被覆盖）
+    ##########################################################################
+    - name: Force build dirs to /mnt
+      run: |
+        cd "$OPENWRT_DIR"
+        cat >> .config << 'EOF'
+        CONFIG_BUILD_DIR="/mnt/openwrt-build/build_dir"
+        CONFIG_STAGING_DIR="/mnt/openwrt-build/staging_dir"
+        CONFIG_DOWNLOAD_FOLDER="/mnt/openwrt-build/dl"
+        EOF
+
+    ##########################################################################
+    # 8. Update & install feeds（收敛安装，防炸）
     ##########################################################################
     - name: Update and install feeds
       run: |
         cd "$OPENWRT_DIR"
         ./scripts/feeds update -a
-        ./scripts/feeds install -a
+
+        ./scripts/feeds install -a -p base
+        ./scripts/feeds install -a -p luci
+        ./scripts/feeds install -a -p packages
+        ./scripts/feeds install -a -p routing
+        ./scripts/feeds install -a -p telephony || true
+
+        # 如果你 feeds.conf 里有这些，再启用
+        ./scripts/feeds install -a -p nss_packages || true
+        ./scripts/feeds install -a -p qmodem || true
 
     ##########################################################################
-    # 9. Run DIY script（只做你定义的轻量动作）
+    # 9. Run DIY script
     ##########################################################################
     - name: Run DIY script
       run: |
@@ -162,22 +171,22 @@ jobs:
         ./$DIY_SCRIPT
 
     ##########################################################################
-    # 10. Load defconfig
+    # 10. Make defconfig
     ##########################################################################
     - name: Make defconfig
       run: |
         cd "$OPENWRT_DIR"
         cp .config .config.before
         make defconfig
-        diff -u .config.before .config | head -20 || true
+        diff -u .config.before .config | head -40 || true
 
     ##########################################################################
-    # 11. Download sources
+    # 11. Download sources（带兜底）
     ##########################################################################
     - name: Download sources
       run: |
         cd "$OPENWRT_DIR"
-        make download -j8
+        make download -j8 || make download -j1 V=s
         find dl -size -1024c -delete
 
     ##########################################################################
@@ -189,11 +198,11 @@ jobs:
         make -j$(nproc) || make -j1 || make -j1 V=s
 
     ##########################################################################
-    # 13. Verify output
+    # 13. Verify output（防空包）
     ##########################################################################
     - name: Verify firmware output
       run: |
-        ls -lh "$OPENWRT_DIR/bin/targets/qualcommax/ipq807x"
+        ls -lh "$OPENWRT_DIR/bin/targets/qualcommax/ipq807x" || exit 1
 
     ##########################################################################
     # 14. Upload firmware
