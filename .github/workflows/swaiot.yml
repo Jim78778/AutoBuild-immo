@@ -83,7 +83,7 @@ jobs:
     - name: Update & install feeds
       run: |
         cd "$OPENWRT_DIR"
-        ./scripts/feeds update base packages luci routing telephony nss_packages sqm_scripts_nss qmodem
+        ./scripts/feeds update -a
         ./scripts/feeds install -a
 
     # 9. Apply diy-part1.sh (执行自定义配置合并和NSS处理)
@@ -203,6 +203,12 @@ jobs:
         echo "文件列表:"
         ls -la "$firmware_dir/"
         
+        # 检查关键文件
+        swaiot_files=$(find "$firmware_dir" -name "*swaiot_cpe_s10*" | wc -l)
+        if [ "$swaiot_files" -eq 0 ]; then
+          echo "❌ 未找到针对 Swaiot CPE-S10 的固件"
+          exit 1
+        fi
         
         echo "✅ 找到 $swaiot_files 个 Swaiot CPE-S10 固件"
         
