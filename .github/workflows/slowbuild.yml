@@ -118,6 +118,17 @@ jobs:
         echo "COMMIT_MESSAGE=$(git show -s --format='Message: %s')" >> $GITHUB_ENV
         echo "COMMIT_HASH=$(git show -s --format='Hash: %H')" >> $GITHUB_ENV
 
+    - name: Force build dirs to /mnt
+      run: |
+        cd "$OPENWRT_DIR"
+
+        cat >> .config << 'EOF'
+        CONFIG_BUILD_DIR="/mnt/openwrt-build/build_dir"
+        CONFIG_STAGING_DIR="/mnt/openwrt-build/staging_dir"
+        CONFIG_DOWNLOAD_FOLDER="/mnt/openwrt-build/dl"
+        EOF
+
+    
     ##########################################################################
     # 7. Copy config & DIY script（已修复路径问题）
     ##########################################################################
