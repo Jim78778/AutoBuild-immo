@@ -1,22 +1,27 @@
-name: Build Swaiot CPE-S10 (ipq807x NSS)
+name: Swaiot CPE-S10-SKY (ipq807x NSS)
 
 on:
   workflow_dispatch:
   push:
     branches:
       - swaiot-s10
-    paths:
-      - 'ci.config'
-      - 'diy-part1.sh'
-      - '.github/workflows/**'
 
 env:
   TZ: Asia/Shanghai
+
+  # Source
   REPO_URL: https://github.com/Jim78778/openwrt-ipq.git
   REPO_BRANCH: swaiot-s10
+
+  # Build config
   CONFIG_FILE: ci.config
   DIY_SCRIPT: diy-part1.sh
-  OPENWRT_DIR: /mnt/openwrt
+
+  # Paths
+  OPENWRT_DIR: /mnt/openwrt-build
+
+  # Switches
+  CACHE_TOOLCHAIN: false
   UPLOAD_FIRMWARE: true
 
 jobs:
@@ -24,163 +29,163 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-    # ------------------------------------------------------------
+    ##########################################################################
     # 1. Checkout workflow repo
-    # ------------------------------------------------------------
+    ##########################################################################
     - name: Checkout workflow repo
       uses: actions/checkout@v4
 
-    # ------------------------------------------------------------
-    # 2. Set timezone
-    # ------------------------------------------------------------
-    - name: Set timezone
-      run: sudo timedatectl set-timezone "$TZ"
-
-    # ------------------------------------------------------------
-    # 3. Aggressive disk cleanup (SAFE MODE)
-    # ------------------------------------------------------------
-    - name: Free disk space
+    ##########################################################################
+    # 2. Show system info (对齐模板，方便排错)
+    ##########################################################################
+    - name: Check system info
       run: |
-        echo "=== Disk before cleanup ==="
-        df -h
+        echo "CPU cores: $(nproc)"
+        echo "CPU model:"
+        cat /proc/cpuinfo | grep -m1 "model name"
+        echo ""
+        echo "Memory:"
+        free -h
+        echo ""
+        df -hT
 
-        sudo rm -rf /usr/share/dotnet
-        sudo rm -rf /usr/local/lib/android
-        sudo rm -rf /usr/local/go
-        sudo rm -rf /usr/share/swift
-        sudo rm -rf /opt/ghc
-        sudo rm -rf /opt/hostedtoolcache
-        sudo rm -rf /usr/local/lib/node_modules
-        sudo rm -rf /usr/local/aws-cli
-        sudo rm -rf /usr/local/aws-sam-cli
-        sudo docker image prune -af || true
-
-        sudo apt-get clean
-        sudo apt-get autoremove -y
-
-        sudo rm -rf /tmp/*
-        sudo rm -rf /var/tmp/*
-
-        echo "=== Disk after cleanup ==="
-        df -h
-
-    # ------------------------------------------------------------
-    # 4. Install OpenWrt build dependencies
-    # ------------------------------------------------------------
-    - name: Install dependencies
+    ##########################################################################
+    # 3. Init environment (重清理，防止爆盘)
+    ##########################################################################
+    - name: Init build environment
+      env:
+        DEBIAN_FRONTEND: noninteractive
       run: |
-        sudo apt update
-        sudo apt install -y \
-          ack antlr3 asciidoc autoconf automake autopoint binutils bison \
-          build-essential bzip2 ccache clang cmake cpio curl \
-          device-tree-compiler ecj fastjar flex gawk gettext \
-          gcc g++ gcc-12 g++-12 gcc-multilib g++-multilib \
-          git gperf haveged help2man intltool jq lib32gcc-s1 libc6-dev-i386 \
-          libelf-dev libglib2.0-dev libgmp3-dev libltdl-dev libmpc-dev \
-          libmpfr-dev libncurses5-dev libncursesw5-dev libreadline-dev \
-          libssl-dev libtool lld lrzsz mkisofs msmtp nano ninja-build \
-          p7zip p7zip-full patch pkgconf python-is-python3 python3 python3-pip \
-          python3-ply python3-docutils python3-setuptools python3-wheel \
-          qemu-utils re2c rsync scons squashfs-tools subversion swig texinfo \
-          uglifyjs upx-ucl unzip vim wget xmlto xxd zlib1g-dev bc file time \
-          xz-utils zstd liblzma-dev libzstd-dev libstdc++-12-dev libcap-dev \
-          libnl-3-dev libnl-genl-3-dev
+        sudo timedatectl set-timezone "$TZ"
 
-          # 安装 NSS 缺失的主机依赖
+        sudo rm -rf \
+          /usr/share/dotnet \
+          /usr/local/lib/android \
+          /opt/ghc \
+          /opt/hostedtoolcache/CodeQL
+
+        sudo docker image prune --all --force
+
+        sudo apt-get -qq update
+        sudo apt-get -qq install \
+          ack antlr3 asciidoc autoconf automake autopoint \
+          binutils bison build-essential bzip2 ccache cmake cpio curl \
+          device-tree-compiler fastjar flex gawk gettext gcc-multilib \
+          g++-multilib git gperf haveged help2man intltool jq \
+          libc6-dev-i386 libelf-dev libglib2.0-dev libgmp3-dev libltdl-dev \
+          libmpc-dev libmpfr-dev libncurses5-dev libncursesw5-dev \
+          libreadline-dev libssl-dev libtool lrzsz mkisofs msmtp \
+          ninja-build p7zip p7zip-full patch pkgconf python-is-python3 \
+          python3 python3-pip python3-pyelftools python3-setuptools \
+          qemu-utils rsync scons squashfs-tools subversion swig texinfo \
+          uglifyjs upx-ucl unzip vim wget xmlto xxd zlib1g-dev \
+          bc file time xz-utils zstd
+
+        sudo apt-get -qq autoremove --purge
+        sudo apt-get -qq clean
+
+        # feeds 中 python host 工具
         pip3 install pysocks unidecode
-        
-    # ------------------------------------------------------------
-    # 5. Prepare /mnt build dir
-    # ------------------------------------------------------------
+
+    ##########################################################################
+    # 4. Merge disk space（模板关键步骤）
+    ##########################################################################
+    - name: Maximize build space
+      uses: easimon/maximize-build-space@master
+      with:
+        swap-size-mb: 1024
+        temp-reserve-mb: 100
+        root-reserve-mb: 1024
+
+    ##########################################################################
+    # 5. Prepare /mnt build directory
+    ##########################################################################
     - name: Prepare build directory
       run: |
         sudo mkdir -p "$OPENWRT_DIR"
         sudo chown $USER:$USER "$OPENWRT_DIR"
-        df -h /mnt
+        df -hT /mnt
 
-    # ------------------------------------------------------------
+    ##########################################################################
     # 6. Clone OpenWrt source
-    # ------------------------------------------------------------
+    ##########################################################################
     - name: Clone OpenWrt source
       run: |
-        git clone --depth=1 -b "$REPO_BRANCH" "$REPO_URL" "$OPENWRT_DIR"
-        df -h
-
-    # ------------------------------------------------------------
-    # 7. Fix feeds.conf.default (REMOVE video feed)
-    # ------------------------------------------------------------
-    - name: Fix feeds
-      run: |
+        git clone "$REPO_URL" -b "$REPO_BRANCH" "$OPENWRT_DIR"
         cd "$OPENWRT_DIR"
 
-        sed -i '/^src-git video/d' feeds.conf.default
+        echo "OPENWRT_PATH=$PWD" >> $GITHUB_ENV
+        echo "COMMIT_AUTHOR=$(git show -s --format='Author: %an')" >> $GITHUB_ENV
+        echo "COMMIT_DATE=$(git show -s --format='Date: %ci')" >> $GITHUB_ENV
+        echo "COMMIT_MESSAGE=$(git show -s --format='Message: %s')" >> $GITHUB_ENV
+        echo "COMMIT_HASH=$(git show -s --format='Hash: %H')" >> $GITHUB_ENV
 
-        cat feeds.conf.default
-
-    # ------------------------------------------------------------
-    # 8. Copy config & DIY script
-    # ------------------------------------------------------------
-    - name: Copy config and DIY script
+    ##########################################################################
+    # 7. Copy config & DIY script
+    ##########################################################################
+    - name: Load config and DIY script
       run: |
-        cp "${{ github.workspace }}/$CONFIG_FILE" "$OPENWRT_DIR/.config"
-        cp "${{ github.workspace }}/$DIY_SCRIPT" "$OPENWRT_DIR/"
+        cp "$GITHUB_WORKSPACE/$CONFIG_FILE" "$OPENWRT_DIR/.config"
+        cp "$GITHUB_WORKSPACE/$DIY_SCRIPT" "$OPENWRT_DIR/"
         chmod +x "$OPENWRT_DIR/$DIY_SCRIPT"
 
-    # ------------------------------------------------------------
-    # 9. Update & install feeds (NO video)
-    # ------------------------------------------------------------
-    - name: Update feeds
+    ##########################################################################
+    # 8. Update & install feeds（明确 feeds）
+    ##########################################################################
+    - name: Update and install feeds
       run: |
         cd "$OPENWRT_DIR"
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
-    # ------------------------------------------------------------
-    # 10. Apply DIY script
-    # ------------------------------------------------------------
-    - name: Apply diy-part1.sh
+    ##########################################################################
+    # 9. Run DIY script（只做轻量定制）
+    ##########################################################################
+    - name: Run DIY script
       run: |
         cd "$OPENWRT_DIR"
         ./$DIY_SCRIPT
 
-    # ------------------------------------------------------------
-    # 11. Defconfig + sanity check
-    # ------------------------------------------------------------
-    - name: Load config
+    ##########################################################################
+    # 10. Load defconfig
+    ##########################################################################
+    - name: Make defconfig
       run: |
         cd "$OPENWRT_DIR"
+        cp .config .config.before
         make defconfig
 
-        grep -q "CONFIG_TARGET_qualcommax_ipq807x_DEVICE_swaiot_cpe_s10=y" .config
+        echo "==== Config diff (first 20 lines) ===="
+        diff -u .config.before .config | head -20 || true
 
-    # ------------------------------------------------------------
-    # 12. Download sources (retry)
-    # ------------------------------------------------------------
-    - name: Download packages
+    ##########################################################################
+    # 11. Download sources
+    ##########################################################################
+    - name: Download sources
       run: |
         cd "$OPENWRT_DIR"
-        make download -j2 || make download -j1
+        make download -j8
+        find dl -size -1024c -delete
 
-    # ------------------------------------------------------------
-    # 13. Build firmware
-    # ------------------------------------------------------------
+    ##########################################################################
+    # 12. Build firmware（三段式）
+    ##########################################################################
     - name: Build firmware
       run: |
         cd "$OPENWRT_DIR"
-        make -j1 V=s
+        echo "Start parallel build..."
+        make -j$(nproc) || make -j1 || make -j1 V=s
 
-    # ------------------------------------------------------------
-    # 14. Verify firmware
-    # ------------------------------------------------------------
-    - name: Verify firmware files
+    ##########################################################################
+    # 13. Verify output
+    ##########################################################################
+    - name: Verify firmware output
       run: |
-        cd "$OPENWRT_DIR"
-        ls -lh bin/targets/qualcommax/ipq807x/
-        find bin/targets/qualcommax/ipq807x -name "*.bin" -o -name "*.ubi" -o -name "*.itb"
+        ls -lh "$OPENWRT_DIR/bin/targets/qualcommax/ipq807x"
 
-    # ------------------------------------------------------------
-    # 15. Upload firmware
-    # ------------------------------------------------------------
+    ##########################################################################
+    # 14. Upload firmware
+    ##########################################################################
     - name: Upload firmware
       if: env.UPLOAD_FIRMWARE == 'true'
       uses: actions/upload-artifact@v4
