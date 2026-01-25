@@ -13,7 +13,7 @@ env:
   REPO_URL: https://github.com/Jim78778/openwrt-ipq.git
   REPO_BRANCH: swaiot-s10
 
-  # Build config
+  # Build config (来自 AutoBuild-immo 仓库)
   CONFIG_FILE: ci.config
   DIY_SCRIPT: diy-part1.sh
 
@@ -30,27 +30,33 @@ jobs:
 
     steps:
     ##########################################################################
-    # 1. Checkout workflow repo
+    # 1. Checkout workflow repo（非常关键：否则 ci.config 不存在）
     ##########################################################################
     - name: Checkout workflow repo
       uses: actions/checkout@v4
 
     ##########################################################################
-    # 2. Show system info (对齐模板，方便排错)
+    # 2. Merge disk space（必须在 apt / clone 之前）
+    ##########################################################################
+    - name: Maximize build space
+      uses: easimon/maximize-build-space@master
+      with:
+        swap-size-mb: 1024
+        temp-reserve-mb: 100
+        root-reserve-mb: 1024
+
+    ##########################################################################
+    # 3. Show system info（对齐模板，方便排错）
     ##########################################################################
     - name: Check system info
       run: |
         echo "CPU cores: $(nproc)"
-        echo "CPU model:"
-        cat /proc/cpuinfo | grep -m1 "model name"
-        echo ""
-        echo "Memory:"
+        cat /proc/cpuinfo | grep -m1 "model name" || true
         free -h
-        echo ""
         df -hT
 
     ##########################################################################
-    # 3. Init environment (重清理，防止爆盘)
+    # 4. Init environment（重清理，防止爆盘）
     ##########################################################################
     - name: Init build environment
       env:
@@ -64,10 +70,10 @@ jobs:
           /opt/ghc \
           /opt/hostedtoolcache/CodeQL
 
-        sudo docker image prune --all --force
+        sudo docker image prune -af || true
 
-        sudo apt-get -qq update
-        sudo apt-get -qq install \
+        sudo apt-get update -y
+        sudo apt-get install -y \
           ack antlr3 asciidoc autoconf automake autopoint \
           binutils bison build-essential bzip2 ccache cmake cpio curl \
           device-tree-compiler fastjar flex gawk gettext gcc-multilib \
@@ -81,21 +87,11 @@ jobs:
           uglifyjs upx-ucl unzip vim wget xmlto xxd zlib1g-dev \
           bc file time xz-utils zstd
 
-        sudo apt-get -qq autoremove --purge
-        sudo apt-get -qq clean
+        sudo apt-get autoremove -y
+        sudo apt-get clean
 
-        # feeds 中 python host 工具
+        # feeds 里 python host 工具
         pip3 install pysocks unidecode
-
-    ##########################################################################
-    # 4. Merge disk space（模板关键步骤）
-    ##########################################################################
-    - name: Maximize build space
-      uses: easimon/maximize-build-space@master
-      with:
-        swap-size-mb: 1024
-        temp-reserve-mb: 100
-        root-reserve-mb: 1024
 
     ##########################################################################
     # 5. Prepare /mnt build directory
@@ -121,18 +117,22 @@ jobs:
         echo "COMMIT_HASH=$(git show -s --format='Hash: %H')" >> $GITHUB_ENV
 
     ##########################################################################
-    # 7. Copy config & DIY script
+    # 7. Copy config & DIY script（已修复路径问题）
     ##########################################################################
     - name: Copy config and diy script
       run: |
-        ls -lah $GITHUB_WORKSPACE
-        cp ci.config "$OPENWRT_DIR/.config"
-        cp diy-part1.sh "$OPENWRT_DIR/"
-        chmod +x "$OPENWRT_DIR/diy-part1.sh"
+        echo "Workspace content:"
+        ls -lah "$GITHUB_WORKSPACE"
 
+        test -f "$GITHUB_WORKSPACE/$CONFIG_FILE"
+        test -f "$GITHUB_WORKSPACE/$DIY_SCRIPT"
+
+        cp "$GITHUB_WORKSPACE/$CONFIG_FILE" "$OPENWRT_DIR/.config"
+        cp "$GITHUB_WORKSPACE/$DIY_SCRIPT" "$OPENWRT_DIR/"
+        chmod +x "$OPENWRT_DIR/$DIY_SCRIPT"
 
     ##########################################################################
-    # 8. Update & install feeds（明确 feeds）
+    # 8. Update & install feeds
     ##########################################################################
     - name: Update and install feeds
       run: |
@@ -141,7 +141,7 @@ jobs:
         ./scripts/feeds install -a
 
     ##########################################################################
-    # 9. Run DIY script（只做轻量定制）
+    # 9. Run DIY script（只做你定义的轻量动作）
     ##########################################################################
     - name: Run DIY script
       run: |
@@ -156,8 +156,6 @@ jobs:
         cd "$OPENWRT_DIR"
         cp .config .config.before
         make defconfig
-
-        echo "==== Config diff (first 20 lines) ===="
         diff -u .config.before .config | head -20 || true
 
     ##########################################################################
@@ -170,12 +168,11 @@ jobs:
         find dl -size -1024c -delete
 
     ##########################################################################
-    # 12. Build firmware（三段式）
+    # 12. Build firmware
     ##########################################################################
     - name: Build firmware
       run: |
         cd "$OPENWRT_DIR"
-        echo "Start parallel build..."
         make -j$(nproc) || make -j1 || make -j1 V=s
 
     ##########################################################################
