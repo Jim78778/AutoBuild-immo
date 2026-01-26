@@ -1,4 +1,4 @@
-name: 1Swaiot CPE-S10-SKY (ipq807x NSS + QMODEM)
+name: Swaiot CPE-S10-SKY (ipq807x NSS + QMODEM)
 
 on:
   workflow_dispatch:
@@ -13,8 +13,8 @@ env:
   REPO_URL: https://github.com/Jim78778/openwrt-ipq.git
   REPO_BRANCH: swaiot-s10
 
-  # Build path (ALL IN /mnt)
-  OPENWRT_DIR: /mnt/openwrt-build
+  # Build path (USE GITHUB WORKSPACE, NOT /mnt)
+  OPENWRT_DIR: ${{ github.workspace }}
 
   # Upload
   UPLOAD_FIRMWARE: true
@@ -25,7 +25,7 @@ jobs:
 
     steps:
     ##########################################################################
-    # 1. Maximize disk space (MUST FIRST)
+    # 1. Maximize disk space (still useful, but not relied on)
     ##########################################################################
     - name: Maximize build space
       uses: easimon/maximize-build-space@master
@@ -35,19 +35,21 @@ jobs:
         root-reserve-mb: 1024
 
     ##########################################################################
-    # 2. Checkout workflow repo (trigger only)
+    # 2. Checkout workflow repo (this IS the build dir now)
     ##########################################################################
     - name: Checkout workflow repo
       uses: actions/checkout@v4
 
     ##########################################################################
-    # 3. System info
+    # 3. System info (critical for sanity)
     ##########################################################################
     - name: System info
       run: |
+        echo "Workspace: $OPENWRT_DIR"
         nproc
         free -h
-        df -hT
+        df -h
+        df -i
 
     ##########################################################################
     # 4. Init build environment
@@ -84,59 +86,39 @@ jobs:
         pip3 install pysocks unidecode
 
     ##########################################################################
-    # 5. Prepare /mnt directory
-    ##########################################################################
-    - name: Prepare /mnt build dir
-      run: |
-        sudo mkdir -p "$OPENWRT_DIR"
-        sudo chown $USER:$USER "$OPENWRT_DIR"
-        df -hT /mnt
-
-    ##########################################################################
-    # 6. Clone OpenWrt
+    # 5. Clone OpenWrt source INTO workspace
     ##########################################################################
     - name: Clone OpenWrt source
       run: |
-        git clone "$REPO_URL" -b "$REPO_BRANCH" "$OPENWRT_DIR"
+        rm -rf ./*
+        git clone "$REPO_URL" -b "$REPO_BRANCH" .
 
     ##########################################################################
-    # 7. Force all build dirs into /mnt
-    ##########################################################################
-    - name: Force build paths
-      run: |
-        cd "$OPENWRT_DIR"
-        cat >> .config << 'EOF'
-        CONFIG_BUILD_DIR="/mnt/openwrt-build/build_dir"
-        CONFIG_STAGING_DIR="/mnt/openwrt-build/staging_dir"
-        CONFIG_DOWNLOAD_FOLDER="/mnt/openwrt-build/dl"
-        EOF
-
-    ##########################################################################
-    # 8. Update & install feeds
+    # 6. Update & install feeds
     ##########################################################################
     - name: Update & install feeds
       run: |
-        cd "$OPENWRT_DIR"
         ./scripts/feeds update -a
 
         ./scripts/feeds install -a
+
     ##########################################################################
-    # 9. Inject QMODEM missing deps (CRITICAL)
+    # 7. Inject QMODEM missing deps (only what qmodem REALLY needs)
     ##########################################################################
     - name: Inject QMODEM dependencies
       run: |
-        cd "$OPENWRT_DIR/package"
+        cd package
 
-        # QWRT Quectel CM 5G
+        # Quectel-CM-5G (qmodem hard dependency)
         git clone https://github.com/QWRT/quectel-CM-5G.git quectel-CM-5G || true
 
-        # quectel-cm placeholder (dependency only)
+        # quectel-cm (dependency provider only)
         git clone https://github.com/immortalwrt/packages.git tmp-pkg || true
         cp -r tmp-pkg/net/quectel-cm .
         rm -rf tmp-pkg
 
     ##########################################################################
-    # 10. Fix qmodem Makefile (kmod-mhi-wwan -> new split)
+    # 8. Patch qmodem Makefile (Linux 6.x MHI split)
     ##########################################################################
     - name: Patch qmodem Makefile
       run: |
@@ -145,44 +127,41 @@ jobs:
           package/feeds/qmodem/qmodem/Makefile || true
 
     ##########################################################################
-    # 11. Make defconfig
+    # 9. Make defconfig
     ##########################################################################
     - name: Make defconfig
       run: |
-        cd "$OPENWRT_DIR"
         make defconfig
 
     ##########################################################################
-    # 12. Download sources
+    # 10. Download sources
     ##########################################################################
     - name: Download sources
       run: |
-        cd "$OPENWRT_DIR"
         make download -j8 || make download -j1 V=s
         find dl -size -1024c -delete
 
     ##########################################################################
-    # 13. Build firmware
+    # 11. Build firmware
     ##########################################################################
     - name: Build firmware
       run: |
-        cd "$OPENWRT_DIR"
         make -j$(nproc) || make -j1 || make -j1 V=s
 
     ##########################################################################
-    # 14. Verify output
+    # 12. Verify output
     ##########################################################################
     - name: Verify output
       run: |
-        ls -lh "$OPENWRT_DIR/bin/targets/qualcommax/ipq807x"
+        ls -lh bin/targets/qualcommax/ipq807x
 
     ##########################################################################
-    # 15. Upload firmware
+    # 13. Upload firmware
     ##########################################################################
     - name: Upload firmware
       if: env.UPLOAD_FIRMWARE == 'true'
       uses: actions/upload-artifact@v4
       with:
         name: Swaiot-CPE-S10-ipq807x-NSS-QMODEM
-        path: /mnt/openwrt-build/bin/targets/qualcommax/ipq807x/
+        path: bin/targets/qualcommax/ipq807x/
         retention-days: 30
