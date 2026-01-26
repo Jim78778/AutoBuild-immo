@@ -119,14 +119,7 @@ jobs:
         cd "$OPENWRT_DIR"
         ./scripts/feeds update -a
 
-        ./scripts/feeds install -a -p base
-        ./scripts/feeds install -a -p luci
-        ./scripts/feeds install -a -p packages
-        ./scripts/feeds install -a -p routing
-        ./scripts/feeds install -a -p telephony || true
-        ./scripts/feeds install -a -p nss_packages || true
-        ./scripts/feeds install -a -p qmodem || true
-
+        ./scripts/feeds install -a
     ##########################################################################
     # 9. Inject QMODEM missing deps (CRITICAL)
     ##########################################################################
