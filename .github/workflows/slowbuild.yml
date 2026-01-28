@@ -38,7 +38,6 @@ jobs:
           build-essential clang flex bison g++ gawk gcc-multilib \
           gettext git \
           libncurses-dev libssl-dev zlib1g-dev \
-          libxcrypt-dev \
           python3 python3-distutils python3-pip \
           rsync unzip file wget curl jq \
           ca-certificates
