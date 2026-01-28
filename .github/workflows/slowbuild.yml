@@ -65,7 +65,7 @@ jobs:
         cd "$OPENWRT_DIR"
 
         ./scripts/feeds update -a
-        ./scripts/feeds install -a
+        ./scripts/feeds install -a -f -p qmodem
 
         # 确保 host 工具存在（解决 jq/host）
         make tools/install -j$(nproc)
