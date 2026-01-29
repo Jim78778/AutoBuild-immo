@@ -65,7 +65,7 @@ jobs:
         cd "$OPENWRT_DIR"
 
         ./scripts/feeds update -a
-        ./scripts/feeds install -a -f -p qmodem
+        ./scripts/feeds install -a
 
         # 确保 host 工具存在（解决 jq/host）
         make tools/install -j$(nproc)
@@ -135,7 +135,7 @@ jobs:
     - name: Build firmware
       run: |
         cd "$OPENWRT_DIR"
-        make -j$(nproc) || make -j1 V=s
+        make world -j$(nproc) || make world -j1 V=s
 
     ##########################################################################
     # 10. Upload firmware
