@@ -19,13 +19,13 @@ jobs:
 
     steps:
     ##########################################################################
-    # 1. Checkout
+    # 1. Checkout workflow repo
     ##########################################################################
     - name: Checkout
       uses: actions/checkout@v4
 
     ##########################################################################
-    # 2. Init build environment（CI 必要最小全集）
+    # 2. Init build environment（补全依赖，关键）
     ##########################################################################
     - name: Init build environment
       env:
@@ -51,28 +51,28 @@ jobs:
         free -h
 
     ##########################################################################
-    # 4. Clone source
+    # 4. Clone OpenWrt source（路径对齐）
     ##########################################################################
     - name: Clone OpenWrt source
       run: |
         git clone --depth=1 "$REPO_URL" -b "$REPO_BRANCH" "$OPENWRT_DIR"
 
     ##########################################################################
-    # 5. Update & install feeds（顺序关键）
+    # 5. Update & install feeds（必须在 defconfig 前）
     ##########################################################################
     - name: Update & install feeds
       run: |
         cd "$OPENWRT_DIR"
 
         ./scripts/feeds update -a
-        ./scripts/feeds install -a -f
+        ./scripts/feeds install -a -f -p qmodem
 
-        # 先装 host/tools，避免 jq/host、ruby/host 警告
+        # 确保 host 工具存在（解决 jq/host）
         make tools/install -j$(nproc)
         make toolchain/install -j$(nproc)
 
     ##########################################################################
-    # 6. FIX QMODEM（6.12 + mhi 正确依赖）
+    # 6. FIX QMODEM（你原来的修复，保留）
     ##########################################################################
     - name: Fix QMODEM dependencies
       run: |
@@ -83,11 +83,11 @@ jobs:
         if [ -f "$QMF" ]; then
           echo "== Fixing QMODEM Makefile =="
 
-          sed -i 's/+kmod-mhi-wwan/+kmod-mhi-bus +kmod-mhi-pci-generic +kmod-mhi-wwan-ctrl +kmod-mhi-wwan-mbim/g' "$QMF"
+          sed -i 's/+kmod-mhi-wwan/+kmod-mhi-bus +kmod-mhi-pci-generic/g' "$QMF"
           sed -i '/quectel-cm/d' "$QMF"
           sed -i '/quectel-CM-5G/d' "$QMF"
 
-          sed -i 's/^DEPENDS:=.*/DEPENDS:=+kmod-mhi-bus +kmod-mhi-pci-generic +kmod-mhi-wwan-ctrl +kmod-mhi-wwan-mbim +kmod-usb-net +kmod-usb-net-qmi-wwan +kmod-usb-net-cdc-mbim +uqmi +umbim +libubus +libuci/' "$QMF"
+          sed -i 's/^DEPENDS:=.*/DEPENDS:=+kmod-mhi-bus +kmod-mhi-pci-generic +kmod-usb-net +kmod-usb-net-qmi-wwan +kmod-usb-net-cdc-mbim +uqmi +umbim +libubus +libuci/' "$QMF"
 
           grep DEPENDS "$QMF"
         else
@@ -95,7 +95,7 @@ jobs:
         fi
 
     ##########################################################################
-    # 7. Load config（只选包，不碰 kernel）
+    # 7. Load config（最小、干净）
     ##########################################################################
     - name: Load config
       run: |
@@ -110,23 +110,14 @@ jobs:
         CONFIG_aarch64=y
         CONFIG_LINUX_6_12=y
 
-        # 避免已知问题包
+        # 避免触发问题包
         # CONFIG_PACKAGE_luci-app-advanced-reboot is not set
         # CONFIG_PACKAGE_onionshare-cli is not set
 
-        # qmodem
         CONFIG_PACKAGE_qmodem=y
-
-        # Netfilter（只选 kmod，不写 CONFIG_KERNEL）
-        CONFIG_PACKAGE_kmod-nf-conntrack=y
-        CONFIG_PACKAGE_kmod-nf-conntrack-netlink=y
-        CONFIG_PACKAGE_kmod-nf-log=y
-        CONFIG_PACKAGE_kmod-nfnetlink=y
         EOF
 
         make defconfig
-        make olddefconfig
-        make target/linux/olddefconfig
 
     ##########################################################################
     # 8. Download sources
@@ -152,6 +143,6 @@ jobs:
       if: env.UPLOAD_FIRMWARE == 'true'
       uses: actions/upload-artifact@v4
       with:
-        name: immortalwrt-ipq807x-s10
+        name: openwrt-ipq807x-s10
         path: openwrt/bin/targets/
         retention-days: 30
