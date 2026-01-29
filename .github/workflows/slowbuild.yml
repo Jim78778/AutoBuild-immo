@@ -118,6 +118,7 @@ jobs:
         EOF
 
         make defconfig
+        make kernel_oldconfig
 
     ##########################################################################
     # 8. Download sources
