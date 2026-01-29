@@ -85,7 +85,7 @@ jobs:
 
           sed -i 's/+kmod-mhi-wwan/+kmod-mhi-bus +kmod-mhi-pci-generic/g' "$QMF"
           sed -i '/quectel-cm/d' "$QMF"
-          sed -i '/quectel-CM-5G/d' "$QMF"
+          sed -i '/quectel_CM_5G_M/d' "$QMF"
 
           sed -i 's/^DEPENDS:=.*/DEPENDS:=+kmod-mhi-bus +kmod-mhi-pci-generic +kmod-usb-net +kmod-usb-net-qmi-wwan +kmod-usb-net-cdc-mbim +uqmi +umbim +libubus +libuci/' "$QMF"
 
