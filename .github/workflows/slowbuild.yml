@@ -1,4 +1,4 @@
-name: immortalwrt (ipq807x s10)
+name: immortalwrt-ipq807x-s10
 
 on:
   workflow_dispatch:
@@ -19,13 +19,13 @@ jobs:
 
     steps:
     ##########################################################################
-    # 1. Checkout workflow repo
+    # 1. Checkout
     ##########################################################################
     - name: Checkout
       uses: actions/checkout@v4
 
     ##########################################################################
-    # 2. Init build environment（补全依赖，关键）
+    # 2. Init build environment（官方推荐 + 够用）
     ##########################################################################
     - name: Init build environment
       env:
@@ -33,17 +33,16 @@ jobs:
       run: |
         sudo timedatectl set-timezone "$TZ"
         sudo apt-get update
-
         sudo apt-get install -y \
           build-essential clang flex bison g++ gawk gcc-multilib \
           gettext git \
-          libncurses-dev libssl-dev zlib1g-dev \
+          libncurses5-dev libncursesw5-dev libssl-dev zlib1g-dev \
           python3 python3-distutils python3-pip \
           rsync unzip file wget curl jq \
           ca-certificates
 
     ##########################################################################
-    # 3. Show disk & memory
+    # 3. Show disk
     ##########################################################################
     - name: Show disk
       run: |
@@ -51,77 +50,25 @@ jobs:
         free -h
 
     ##########################################################################
-    # 4. Clone OpenWrt source（路径对齐）
+    # 4. Clone source
     ##########################################################################
     - name: Clone OpenWrt source
       run: |
         git clone --depth=1 "$REPO_URL" -b "$REPO_BRANCH" "$OPENWRT_DIR"
 
     ##########################################################################
-    # 5. Update & install feeds（必须在 defconfig 前）
+    # 5. Update & install feeds
     ##########################################################################
     - name: Update & install feeds
       run: |
         cd "$OPENWRT_DIR"
-
         ./scripts/feeds update -a
         ./scripts/feeds install -a
-
-        # 确保 host 工具存在（解决 jq/host）
-        make tools/install -j$(nproc)
-        make toolchain/install -j$(nproc)
+        ./scripts/feeds install -a -p -f qmodem
+    
 
     ##########################################################################
-    # 6. FIX QMODEM（你原来的修复，保留）
-    ##########################################################################
-    - name: Fix QMODEM dependencies
-      run: |
-        cd "$OPENWRT_DIR"
-
-        QMF="package/feeds/qmodem/qmodem/Makefile"
-
-        if [ -f "$QMF" ]; then
-          echo "== Fixing QMODEM Makefile =="
-
-          sed -i 's/+kmod-mhi-wwan/+kmod-mhi-bus +kmod-mhi-pci-generic/g' "$QMF"
-          sed -i '/quectel-cm/d' "$QMF"
-          sed -i '/quectel_CM_5G_M/d' "$QMF"
-
-          sed -i 's/^DEPENDS:=.*/DEPENDS:=+kmod-mhi-bus +kmod-mhi-pci-generic +kmod-usb-net +kmod-usb-net-qmi-wwan +kmod-usb-net-cdc-mbim +uqmi +umbim +libubus +libuci/' "$QMF"
-
-          grep DEPENDS "$QMF"
-        else
-          echo "QMODEM not found, skip patch"
-        fi
-
-    ##########################################################################
-    # 7. Load config（最小、干净）
-    ##########################################################################
-    - name: Load config
-      run: |
-        cd "$OPENWRT_DIR"
-
-        cat > .config << 'EOF'
-        CONFIG_TARGET_qualcommax=y
-        CONFIG_TARGET_qualcommax_ipq807x=y
-        CONFIG_TARGET_qualcommax_ipq807x_DEVICE_swaiot_cpe_s10=y
-
-        CONFIG_ARCH_64BIT=y
-        CONFIG_aarch64=y
-        CONFIG_LINUX_6_12=y
-
-        # 避免触发问题包
-        # CONFIG_PACKAGE_luci-app-advanced-reboot is not set
-        # CONFIG_PACKAGE_onionshare-cli is not set
-
-        CONFIG_PACKAGE_qmodem=y
-        EOF
-
-        make defconfig
-        make kernel_oldconfig
-
-    ##########################################################################
-    # 8. Download sources
+    # 7. Download sources
     ##########################################################################
     - name: Download sources
       run: |
@@ -130,7 +77,7 @@ jobs:
         find dl -size -1024c -delete
 
     ##########################################################################
-    # 9. Build firmware
+    # 8. Build firmware
     ##########################################################################
     - name: Build firmware
       run: |
@@ -138,7 +85,7 @@ jobs:
         make world -j$(nproc) || make world -j1 V=s
 
     ##########################################################################
-    # 10. Upload firmware
+    # 9. Upload firmware
     ##########################################################################
     - name: Upload firmware
       if: env.UPLOAD_FIRMWARE == 'true'
