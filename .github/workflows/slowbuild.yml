@@ -56,16 +56,13 @@ jobs:
         CONFIG_ARCH_64BIT=y
         CONFIG_aarch64=y
 
-        # Kernel
-        CONFIG_LINUX_6_12=y
 
         # Disable unused troublemakers
         # (避免 jq / python / onionshare 警告变 error)
         # CONFIG_PACKAGE_luci-app-advanced-reboot is not set
         # CONFIG_PACKAGE_onionshare-cli is not set
 
-        # qmodem（假设你仓库里已修 DEPENDS）
-        CONFIG_PACKAGE_qmodem=y
+        
 
         EOF
 
