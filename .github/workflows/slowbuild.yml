@@ -10,7 +10,7 @@ env:
   TZ: Asia/Shanghai
   REPO_URL: https://github.com/Jim78778/immortalwrt.git
   REPO_BRANCH: main
-  OPENWRT_DIR: ${{ github.workspace }}/openwrt
+  OPENWRT_DIR: openwrt
   UPLOAD_FIRMWARE: true
 
 jobs:
@@ -18,122 +18,99 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
+    ##########################################################################
+    # 1. 扩容磁盘
+    ##########################################################################
     - name: 合并磁盘
       uses: easimon/maximize-build-space@master
       with:
         swap-size-mb: 1024
         temp-reserve-mb: 100
         root-reserve-mb: 2048
+
     ##########################################################################
-    # 1. Checkout
+    # 2. Checkout workflow 仓库
     ##########################################################################
     - name: Checkout
       uses: actions/checkout@v4
 
-
-    - name: 创建工作目录
-      run: |
-        mkdir -p ${GITHUB_WORKSPACE}/workdir
-        chmod 755 ${GITHUB_WORKSPACE}/workdir
-        echo "WORKDIR_PATH=$PWD" >> $GITHUB_ENV
-
-    - name: 检查服务器配置
-      run: |
-        echo "若分配的服务器性能不足，务必及时取消，重新运行！"
-        echo -e "------------------------------- CPU信息 -------------------------------\n"
-        echo "CPU物理数量:$(cat /proc/cpuinfo| grep "physical id"| sort| uniq| wc -l)"
-        echo -e "CPU核心及版本信息: $(cat /proc/cpuinfo | grep name | cut -f2 -d: | uniq -c) \n"
-        echo -e "------------------------------- 内存信息 -------------------------------\n"
-        echo "已安装内存详细信息: "
-        sudo lshw -short -C memory | grep GiB
-        echo -e "\n"
-        echo -e "------------------------------- 磁盘信息 -------------------------------\n"
-        echo -e "磁盘数量: $(ls /dev/sd* | grep -v [1-9] | wc -l) \n"
-        echo "------------------------------- 磁盘详情 -------------------------------\n"
-        df -Th
     ##########################################################################
-    # 2. Init build environment（官方推荐 + 够用）
+    # 3. 初始化构建环境
     ##########################################################################
-    - name: Init build environment
+    - name: 初始化构建环境
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
         sudo timedatectl set-timezone "$TZ"
         sudo apt-get update
-        sudo apt-get install -y ack antlr3 asciidoc autoconf automake autopoint \
-          build-essential bison build-essential \
-          bzip2 clang  ccache clang cmake cpio flex bison g++ gawk gcc-multilib \
-          gettext git squashfs-tools libreadline-dev libssl-dev libtool libyaml-dev libz-dev lld llvm lrzsz \
-          libncurses5-dev libncursesw5-dev libssl-dev zlib1g-dev \
-          python3 python3-distutils python3-pip python3-ply python3-docutils \
-          rsync unzip file wget curl jq intltool lib32gcc-s1 libc6-dev-i386 \
-          ca-certificates upx-ucl unzip vim xmlto xxd zlib1g-dev zstd
+        sudo apt-get install -y \
+          build-essential clang flex gawk gcc-multilib gettext git \
+          libncurses5-dev libssl-dev python3 python3-distutils python3-pip \
+          rsync unzip zlib1g-dev file wget curl jq \
+          ca-certificates ccache
 
     ##########################################################################
-    # 3. Show disk
+    # 4. 克隆 ImmortalWrt（直接指定分支）
     ##########################################################################
-    - name: Show disk
+    - name: 克隆 ImmortalWrt 源码
       run: |
-        df -hT
-        free -h
-       
-        echo "------------------------------- 清理Docker镜像和软件 -------------------------------"
-        [ -n "$(docker images -q)" ] && docker rmi $(docker images -q)
-        docker image prune -a -f
-        sudo -E apt-get -y purge azure-cli ghc* zulu* hhvm llvm* firefox google* dotnet* powershell openjdk* adoptopenjdk* mysql* php* mongodb* dotnet* moby* snapd* android* || true
-        sudo -E apt-get -qq autoremove --purge
-        sudo -E apt-get -qq clean
-        echo "------------------------------- 设置时区 -------------------------------"
-        sudo timedatectl set-timezone "$TZ"
+        git clone --depth=1 -b "$REPO_BRANCH" "$REPO_URL" "$OPENWRT_DIR"
+
     ##########################################################################
-    # 4. Clone source
+    # 5. cache
     ##########################################################################
-    - name: Clone OpenWrt source
-      run: |
-        git clone --depth=1 "$REPO_URL" -b "$REPO_BRANCH" "$OPENWRT_DIR"
-    - name: 缓存构建动作
+    - name: 缓存构建
       uses: klever1988/cachewrtbuild@main
       with:
-        ccache: 'true'
-        mixkey: ${{ matrix.os }}-${{ matrix.ARCHITECTURE }}-${{ matrix.REPO_BRANCH }}
+        ccache: true
         prefix: ${{ github.workspace }}/openwrt
+        mixkey: ipq807x-s10-${{ env.REPO_BRANCH }}
 
     ##########################################################################
-    # 5. Update & install feeds
+    # 6. 更新 feeds（完全信任你仓库里的 feeds.conf）
     ##########################################################################
-    - name: Update & install feeds
+    - name: 更新 feeds
       run: |
         cd "$OPENWRT_DIR"
         ./scripts/feeds update -a
         ./scripts/feeds install -a
-        ./scripts/feeds install -a -p -f qmodem
-    
 
     ##########################################################################
-    # 7. Download sources
+    # 7. 放入配置并 defconfig
     ##########################################################################
-    - name: Download sources
+    - name: 配置 .config
       run: |
         cd "$OPENWRT_DIR"
-        make download -j8 || make download -j1 V=s
-        find dl -size -1024c -exec ls -l {} \;
-        find dl -size -1024c -exec rm -f {} \;
+        if [ -f "${{ github.workspace }}/.config" ]; then
+          cp "${{ github.workspace }}/.config" .config
+          echo "使用自带 .config"
+        fi
+        make defconfig
 
     ##########################################################################
-    # 8. Build firmware
+    # 8. 下载源码
     ##########################################################################
-    - name: Build firmware
+    - name: 下载源码
       run: |
         cd "$OPENWRT_DIR"
-        make world -j$(nproc) || make world -j1 V=s
+        make download -j$(nproc)
+        find dl -size -1024c -delete
 
     ##########################################################################
-    # 9. Upload firmware
+    # 9. 编译
     ##########################################################################
-    - name: Upload firmware
+    - name: 编译固件
+      run: |
+        cd "$OPENWRT_DIR"
+        make -j$(nproc) || make -j1 V=s
+
+    ##########################################################################
+    # 10. 上传固件
+    ##########################################################################
+    - name: 上传固件
       if: env.UPLOAD_FIRMWARE == 'true'
       uses: actions/upload-artifact@v4
       with:
-        name: openwrt-ipq807x-s10
-        path: openwrt/bin/targets/
+        name: immortalwrt-ipq807x-s10
+        path: openwrt/bin/targets
         retention-days: 30
