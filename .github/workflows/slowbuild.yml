@@ -9,7 +9,7 @@ on:
 env:
   TZ: Asia/Shanghai
   REPO_URL: https://github.com/Jim78778/immortalwrt.git
-  REPO_BRANCH: main
+  # REPO_BRANCH: main
   OPENWRT_DIR: ${{ github.workspace }}/openwrt
   UPLOAD_FIRMWARE: true
 
@@ -18,12 +18,39 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
+    - name: 合并磁盘
+      uses: easimon/maximize-build-space@master
+      with:
+        swap-size-mb: 1024
+        temp-reserve-mb: 100
+        root-reserve-mb: 1024
     ##########################################################################
     # 1. Checkout
     ##########################################################################
     - name: Checkout
       uses: actions/checkout@v4
 
+
+    - name: 创建工作目录
+      run: |
+        mkdir -p ${GITHUB_WORKSPACE}/workdir
+        chmod 755 ${GITHUB_WORKSPACE}/workdir
+        echo "WORKDIR_PATH=$PWD" >> $GITHUB_ENV
+
+    - name: 检查服务器配置
+      run: |
+        echo "若分配的服务器性能不足，务必及时取消，重新运行！"
+        echo -e "------------------------------- CPU信息 -------------------------------\n"
+        echo "CPU物理数量:$(cat /proc/cpuinfo| grep "physical id"| sort| uniq| wc -l)"
+        echo -e "CPU核心及版本信息: $(cat /proc/cpuinfo | grep name | cut -f2 -d: | uniq -c) \n"
+        echo -e "------------------------------- 内存信息 -------------------------------\n"
+        echo "已安装内存详细信息: "
+        sudo lshw -short -C memory | grep GiB
+        echo -e "\n"
+        echo -e "------------------------------- 磁盘信息 -------------------------------\n"
+        echo -e "磁盘数量: $(ls /dev/sd* | grep -v [1-9] | wc -l) \n"
+        echo "------------------------------- 磁盘详情 -------------------------------\n"
+        df -Th
     ##########################################################################
     # 2. Init build environment（官方推荐 + 够用）
     ##########################################################################
@@ -33,13 +60,14 @@ jobs:
       run: |
         sudo timedatectl set-timezone "$TZ"
         sudo apt-get update
-        sudo apt-get install -y \
-          build-essential clang flex bison g++ gawk gcc-multilib \
-          gettext git \
+        sudo apt-get install -y ack antlr3 asciidoc autoconf automake autopoint \
+          build-essential bison build-essential \
+          bzip2 clang  ccache clang cmake cpio flex bison g++ gawk gcc-multilib \
+          gettext git squashfs-tools libreadline-dev libssl-dev libtool libyaml-dev libz-dev lld llvm lrzsz \
           libncurses5-dev libncursesw5-dev libssl-dev zlib1g-dev \
-          python3 python3-distutils python3-pip \
-          rsync unzip file wget curl jq \
-          ca-certificates
+          python3 python3-distutils python3-pip python3-ply python3-docutils \
+          rsync unzip file wget curl jq intltool lib32gcc-s1 libc6-dev-i386 \
+          ca-certificates upx-ucl unzip vim xmlto xxd zlib1g-dev zstd
 
     ##########################################################################
     # 3. Show disk
@@ -48,13 +76,27 @@ jobs:
       run: |
         df -hT
         free -h
-
+       
+        echo "------------------------------- 清理Docker镜像和软件 -------------------------------"
+        [ -n "$(docker images -q)" ] && docker rmi $(docker images -q)
+        docker image prune -a -f
+        sudo -E apt-get -y purge azure-cli ghc* zulu* hhvm llvm* firefox google* dotnet* powershell openjdk* adoptopenjdk* mysql* php* mongodb* dotnet* moby* snapd* android* || true
+        sudo -E apt-get -qq autoremove --purge
+        sudo -E apt-get -qq clean
+        echo "------------------------------- 设置时区 -------------------------------"
+        sudo timedatectl set-timezone "$TZ"
     ##########################################################################
     # 4. Clone source
     ##########################################################################
     - name: Clone OpenWrt source
       run: |
         git clone --depth=1 "$REPO_URL" -b "$REPO_BRANCH" "$OPENWRT_DIR"
+    - name: 缓存构建动作
+      uses: klever1988/cachewrtbuild@main
+      with:
+        ccache: 'true'
+        mixkey: ${{ matrix.os }}-${{ matrix.ARCHITECTURE }}-${{ matrix.REPO_BRANCH }}
+        prefix: ${{ github.workspace }}/openwrt
 
     ##########################################################################
     # 5. Update & install feeds
@@ -74,7 +116,8 @@ jobs:
       run: |
         cd "$OPENWRT_DIR"
         make download -j8 || make download -j1 V=s
-        find dl -size -1024c -delete
+        find dl -size -1024c -exec ls -l {} \;
+        find dl -size -1024c -exec rm -f {} \;
 
     ##########################################################################
     # 8. Build firmware
