@@ -37,9 +37,9 @@ jobs:
     # 4️⃣ 克隆你的 OpenWrt 源码（⚠️ 不是官方源）
     - name: Clone OpenWrt source
       run: |
-        git clone https://github.com/Jim78778/immortalwrt-ipq.git openwrt
+        git clone https://github.com/Jim78778/immortalwrt.git openwrt
         cd openwrt
-        git checkout swaiot-s10
+        git checkout main
 
     # 5️⃣ 更新 feeds
     - name: Update & install feeds
