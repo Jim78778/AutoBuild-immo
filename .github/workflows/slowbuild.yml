@@ -21,29 +21,37 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
 
+    # ---------- 1. 基础依赖（补齐 mkimage） ----------
     - name: Init build environment
       run: |
         sudo apt-get update
         sudo apt-get install -y \
           build-essential clang flex bison g++ gawk gcc-multilib \
-          gettext git libncurses5-dev libssl-dev python3 python3-distutils \
-          rsync unzip zlib1g-dev file wget
+          gettext git libncurses5-dev libssl-dev \
+          python3 python3-distutils python3-setuptools \
+          rsync unzip zlib1g-dev file wget \
+          u-boot-tools xz-utils ccache
 
-    - name: Show disk
+    # ---------- 2. 显示 & 清理磁盘 ----------
+    - name: Prepare disk space
       run: |
         df -hT
-        free -h
+        sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android
+        sudo apt-get clean
+        df -hT
 
     - name: Clone OpenWrt source
       run: |
         git clone "$REPO_URL" -b "$REPO_BRANCH" "$OPENWRT_DIR"
 
+    # ---------- 3. Feeds ----------
     - name: Update & install feeds
       run: |
         cd "$OPENWRT_DIR"
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
+    # ---------- 4. 精简 & 正确的 config ----------
     - name: Load config
       run: |
         cd "$OPENWRT_DIR"
@@ -56,39 +64,46 @@ jobs:
         CONFIG_ARCH_64BIT=y
         CONFIG_aarch64=y
 
+        # 关闭调试 / 开发选项，省空间 + 稳定
+        # CONFIG_DEVEL is not set
+        # CONFIG_KERNEL_DEBUG is not set
+        # CONFIG_COLLECT_KERNEL_DEBUG is not set
 
-        # Disable unused troublemakers
-        # (避免 jq / python / onionshare 警告变 error)
-        # CONFIG_PACKAGE_luci-app-advanced-reboot is not set
-        # CONFIG_PACKAGE_onionshare-cli is not set
-
-        
-
+        # 防止 feeds warning 放大
+        CONFIG_IGNORE_ERRORS=n
         EOF
 
         make defconfig
 
+    # ---------- 5. 下载 ----------
     - name: Download sources
       run: |
         cd "$OPENWRT_DIR"
         make download -j8 || make download -j1 V=s
         find dl -size -1024c -delete
 
-    - name: Build tools & toolchain
+    # ---------- 6. 工具链 ----------
+    - name: Build tools
       run: |
         cd "$OPENWRT_DIR"
-        make tools/compile -j1
-        make toolchain/compile -j1
+        make tools/compile -j1 V=s
 
+    - name: Build toolchain
+      run: |
+        cd "$OPENWRT_DIR"
+        make toolchain/compile -j1 V=s
+
+    # ---------- 7. 固件 ----------
     - name: Build firmware
       run: |
         cd "$OPENWRT_DIR"
         make -j1 V=s
 
+    # ---------- 8. 上传 ----------
     - name: Upload firmware
       if: env.UPLOAD_FIRMWARE == 'true'
       uses: actions/upload-artifact@v4
       with:
         name: openwrt-ipq807x-s10
         path: |
-          openwrt/bin/targets/**/*
+          openwrt/bin/targets/**
