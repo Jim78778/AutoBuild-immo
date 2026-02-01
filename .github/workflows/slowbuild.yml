@@ -71,11 +71,6 @@ jobs:
         prefix: ${{ github.workspace }}/openwrt
         mixkey: ipq807x-s10-${{ env.REPO_BRANCH }}
 
-    - name: 固定 gn commit
-      run: |
-        cd "$OPENWRT_DIR/package/feeds/packages/gn"
-        git fetch --depth=1 origin 103f8b43
-        git checkout 103f8b43
     ##########################################################################
     # 6. 更新 feeds（完全信任你仓库里的 feeds.conf）
     ##########################################################################
