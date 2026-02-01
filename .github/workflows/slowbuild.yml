@@ -100,6 +100,13 @@ jobs:
         make download -j$(nproc)
         find dl -size -1024c -delete
 
+    - name: Lock gn version
+      run: |
+          cd openwrt/feeds/packages/devel/gn
+          git fetch
+          git checkout b8f2c8e6a1b3f7f2b0f2c6a6d2c8e1b8e5c7d9c4
+
+
     ##########################################################################
     # 9. 编译
     ##########################################################################
