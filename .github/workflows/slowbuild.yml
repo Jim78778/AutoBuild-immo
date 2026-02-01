@@ -62,7 +62,17 @@ jobs:
         git clone --depth=1 -b "$REPO_BRANCH" "$REPO_URL" "$OPENWRT_DIR"
 
     ##########################################################################
-    # 5. 固定 gn commit（避免 GCC 12 编译失败）
+    # 5. 更新 feeds（完全信任你仓库里的 feeds.conf）
+    ##########################################################################
+    - name: 更新 feeds
+      run: |
+        cd "$OPENWRT_DIR"
+        ./scripts/feeds update -a
+        ./scripts/feeds install -a
+        ./scripts/feeds install -a -f -p qmodem
+
+    ##########################################################################
+    # 6. 固定 gn commit（避免 GCC 12 编译失败）
     ##########################################################################
     - name: 固定 gn commit
       run: |
@@ -71,7 +81,7 @@ jobs:
         git checkout 103f8b43
 
     ##########################################################################
-    # 6. cache
+    # 7. cache
     ##########################################################################
     - name: 缓存构建
       uses: klever1988/cachewrtbuild@main
@@ -79,16 +89,6 @@ jobs:
         ccache: true
         prefix: ${{ github.workspace }}/openwrt
         mixkey: ipq807x-s10-${{ env.REPO_BRANCH }}
-
-    ##########################################################################
-    # 7. 更新 feeds（完全信任你仓库里的 feeds.conf）
-    ##########################################################################
-    - name: 更新 feeds
-      run: |
-        cd "$OPENWRT_DIR"
-        ./scripts/feeds update -a
-        ./scripts/feeds install -a
-        ./scripts/feeds install -a -f -p qmodem
 
     ##########################################################################
     # 8. 放入配置并 defconfig
