@@ -47,5 +47,3 @@ jobs:
           name: enabled-packages-list
           path: enabled_packages.txt
           retention-days: 7
-      run: |
-        echo "✅ DTS successfully compiled via kernel build"
