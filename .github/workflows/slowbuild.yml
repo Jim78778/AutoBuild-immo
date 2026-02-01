@@ -78,6 +78,7 @@ jobs:
         cd "$OPENWRT_DIR"
         ./scripts/feeds update -a
         ./scripts/feeds install -a
+        ./scripts/feeds install -a -f -p qmodem
 
     ##########################################################################
     # 7. 放入配置并 defconfig
