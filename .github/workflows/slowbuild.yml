@@ -1,16 +1,16 @@
-name: Build OpenWrt (ipq807x s10)
+name: immortalwrt-ipq807x-s10
 
 on:
   workflow_dispatch:
   push:
     branches:
-      - main
+      - swaiot-s10
 
 env:
   TZ: Asia/Shanghai
   REPO_URL: https://github.com/Jim78778/immortalwrt.git
   REPO_BRANCH: main
-  OPENWRT_DIR: ${{ github.workspace }}/openwrt
+  OPENWRT_DIR: openwrt
   UPLOAD_FIRMWARE: true
 
 jobs:
@@ -18,92 +18,114 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
+    ##########################################################################
+    # 1. 扩容磁盘
+    ##########################################################################
+    - name: 合并磁盘
+      uses: easimon/maximize-build-space@master
+      with:
+        swap-size-mb: 1024
+        temp-reserve-mb: 1024
+        root-reserve-mb: 2048
+
+    ##########################################################################
+    # 2. Checkout workflow 仓库
+    ##########################################################################
     - name: Checkout
       uses: actions/checkout@v4
 
-    # ---------- 1. 基础依赖（补齐 mkimage） ----------
-    - name: Init build environment
+    ##########################################################################
+    # 3. 初始化构建环境
+    ##########################################################################
+    - name: 初始化构建环境
+      env:
+        DEBIAN_FRONTEND: noninteractive
       run: |
+        sudo timedatectl set-timezone "$TZ"
         sudo apt-get update
         sudo apt-get install -y \
-          build-essential clang flex bison g++ gawk gcc-multilib \
-          gettext git libncurses5-dev libssl-dev \
-          python3 python3-distutils python3-setuptools \
-          rsync unzip zlib1g-dev file wget \
-          u-boot-tools xz-utils ccache
+          build-essential clang flex gawk gcc-multilib gettext git \
+          libncurses5-dev libssl-dev python3 python3-distutils python3-pip \
+          rsync unzip zlib1g-dev file wget curl jq \
+          ca-certificates ccache
 
-    # ---------- 2. 显示 & 清理磁盘 ----------
-    - name: Prepare disk space
+        # 安装 GCC 11 并切换默认
+        sudo apt-get install -y gcc-11 g++-11
+        sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 100
+        sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-11 100
+
+    ##########################################################################
+    # 4. 克隆 ImmortalWrt（直接指定分支）
+    ##########################################################################
+    - name: 克隆 ImmortalWrt 源码
       run: |
-        df -hT
-        sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android
-        sudo apt-get clean
-        df -hT
+        git clone --depth=1 -b "$REPO_BRANCH" "$REPO_URL" "$OPENWRT_DIR"
 
-    - name: Clone OpenWrt source
+    ##########################################################################
+    # 5. 固定 gn commit（避免 GCC 12 编译失败）
+    ##########################################################################
+    - name: 固定 gn commit
       run: |
-        git clone "$REPO_URL" -b "$REPO_BRANCH" "$OPENWRT_DIR"
+        cd "$OPENWRT_DIR/package/feeds/packages/gn"
+        git fetch --depth=1 origin 103f8b43
+        git checkout 103f8b43
 
-    # ---------- 3. Feeds ----------
-    - name: Update & install feeds
+    ##########################################################################
+    # 6. cache
+    ##########################################################################
+    - name: 缓存构建
+      uses: klever1988/cachewrtbuild@main
+      with:
+        ccache: true
+        prefix: ${{ github.workspace }}/openwrt
+        mixkey: ipq807x-s10-${{ env.REPO_BRANCH }}
+
+    ##########################################################################
+    # 7. 更新 feeds（完全信任你仓库里的 feeds.conf）
+    ##########################################################################
+    - name: 更新 feeds
       run: |
         cd "$OPENWRT_DIR"
         ./scripts/feeds update -a
         ./scripts/feeds install -a
+        ./scripts/feeds install -a -f -p qmodem
 
-    # ---------- 4. 精简 & 正确的 config ----------
-    - name: Load config
+    ##########################################################################
+    # 8. 放入配置并 defconfig
+    ##########################################################################
+    - name: 配置 .config
       run: |
         cd "$OPENWRT_DIR"
-
-        cat > .config << 'EOF'
-        CONFIG_TARGET_qualcommax=y
-        CONFIG_TARGET_qualcommax_ipq807x=y
-        CONFIG_TARGET_qualcommax_ipq807x_DEVICE_swaiot_cpe_s10=y
-
-        CONFIG_ARCH_64BIT=y
-        CONFIG_aarch64=y
-
-        # 关闭调试 / 开发选项，省空间 + 稳定
-        # CONFIG_DEVEL is not set
-        # CONFIG_KERNEL_DEBUG is not set
-        # CONFIG_COLLECT_KERNEL_DEBUG is not set
-
-        # 防止 feeds warning 放大
-        CONFIG_IGNORE_ERRORS=n
-        EOF
-
+        if [ -f "${{ github.workspace }}/.config" ]; then
+          cp "${{ github.workspace }}/.config" .config
+          echo "使用自带 .config"
+        fi
         make defconfig
 
-    # ---------- 5. 下载 ----------
-    - name: Download sources
+    ##########################################################################
+    # 9. 下载源码
+    ##########################################################################
+    - name: 下载源码
       run: |
         cd "$OPENWRT_DIR"
-        make download -j8 || make download -j1 V=s
+        make download -j$(nproc)
         find dl -size -1024c -delete
 
-    # ---------- 6. 工具链 ----------
-    - name: Build tools
+    ##########################################################################
+    # 10. 编译
+    ##########################################################################
+    - name: 编译固件
       run: |
         cd "$OPENWRT_DIR"
-        make tools/compile -j1 V=s
+        make -j$(nproc) || make -j1 V=s
 
-    - name: Build toolchain
-      run: |
-        cd "$OPENWRT_DIR"
-        make toolchain/compile -j1 V=s
-
-    # ---------- 7. 固件 ----------
-    - name: Build firmware
-      run: |
-        cd "$OPENWRT_DIR"
-        make -j1 V=s
-
-    # ---------- 8. 上传 ----------
-    - name: Upload firmware
+    ##########################################################################
+    # 11. 上传固件
+    ##########################################################################
+    - name: 上传固件
       if: env.UPLOAD_FIRMWARE == 'true'
       uses: actions/upload-artifact@v4
       with:
-        name: openwrt-ipq807x-s10
-        path: |
-          openwrt/bin/targets/**
+        name: immortalwrt-ipq807x-s10
+        path: openwrt/bin/targets
+        retention-days: 30
