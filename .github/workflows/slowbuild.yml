@@ -48,10 +48,11 @@ jobs:
           libncurses5-dev libssl-dev python3 python3-distutils python3-pip \
           rsync unzip zlib1g-dev file wget curl jq \
           ca-certificates ccache
-       
-         sudo apt-get install -y gcc-11 g++-11
-         sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 100
-         sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-11 100
+
+        # 安装 GCC 11 并切换默认
+        sudo apt-get install -y gcc-11 g++-11
+        sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 100
+        sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-11 100
 
     ##########################################################################
     # 4. 克隆 ImmortalWrt（直接指定分支）
@@ -61,7 +62,16 @@ jobs:
         git clone --depth=1 -b "$REPO_BRANCH" "$REPO_URL" "$OPENWRT_DIR"
 
     ##########################################################################
-    # 5. cache
+    # 5. 固定 gn commit（避免 GCC 12 编译失败）
+    ##########################################################################
+    - name: 固定 gn commit
+      run: |
+        cd "$OPENWRT_DIR/package/feeds/packages/gn"
+        git fetch --depth=1 origin 103f8b43
+        git checkout 103f8b43
+
+    ##########################################################################
+    # 6. cache
     ##########################################################################
     - name: 缓存构建
       uses: klever1988/cachewrtbuild@main
@@ -71,7 +81,7 @@ jobs:
         mixkey: ipq807x-s10-${{ env.REPO_BRANCH }}
 
     ##########################################################################
-    # 6. 更新 feeds（完全信任你仓库里的 feeds.conf）
+    # 7. 更新 feeds（完全信任你仓库里的 feeds.conf）
     ##########################################################################
     - name: 更新 feeds
       run: |
@@ -81,7 +91,7 @@ jobs:
         ./scripts/feeds install -a -f -p qmodem
 
     ##########################################################################
-    # 7. 放入配置并 defconfig
+    # 8. 放入配置并 defconfig
     ##########################################################################
     - name: 配置 .config
       run: |
@@ -93,7 +103,7 @@ jobs:
         make defconfig
 
     ##########################################################################
-    # 8. 下载源码
+    # 9. 下载源码
     ##########################################################################
     - name: 下载源码
       run: |
@@ -101,9 +111,8 @@ jobs:
         make download -j$(nproc)
         find dl -size -1024c -delete
 
-
     ##########################################################################
-    # 9. 编译
+    # 10. 编译
     ##########################################################################
     - name: 编译固件
       run: |
@@ -111,7 +120,7 @@ jobs:
         make -j$(nproc) || make -j1 V=s
 
     ##########################################################################
-    # 10. 上传固件
+    # 11. 上传固件
     ##########################################################################
     - name: 上传固件
       if: env.UPLOAD_FIRMWARE == 'true'
