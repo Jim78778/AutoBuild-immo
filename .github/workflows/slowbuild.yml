@@ -15,7 +15,7 @@ env:
 
 jobs:
   build:
-    runs-on: ubuntu-latest 
+    runs-on: ubuntu-latest
 
     steps:
     ##########################################################################
@@ -35,206 +35,65 @@ jobs:
       uses: actions/checkout@v4
 
     ##########################################################################
-    # 3. 初始化构建环境
+    # 3. 初始化构建环境（干净版）
     ##########################################################################
     - name: 初始化构建环境
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
         sudo timedatectl set-timezone "$TZ"
-    
-        sudo apt-get update
-        sudo apt-get install -y \
-         ack antlr3 asciidoc autoconf automake autopoint \
-         binutils bison build-essential \
-         bzip2 ccache clang cmake cpio curl \
-         device-tree-compiler ecj fastjar flex gawk gettext \
-         gcc-multilib g++-multilib git gnutls-dev gperf \
-         haveged help2man intltool \
-         lib32gcc-s1 libc6-dev-i386 libelf-dev \
-         libglib2.0-dev libgmp3-dev libltdl-dev \
-         libmpc-dev libmpfr-dev libncurses-dev \
-         libpython3-dev libreadline-dev libssl-dev \
-         libtool libyaml-dev libz-dev \
-         lld llvm lrzsz mkisofs msmtp nano \
-         ninja-build p7zip p7zip-full patch pkgconf \
-         python3 python3-pip python3-ply python3-docutils \
-         python3-pyelftools qemu-utils re2c rsync scons \
-         squashfs-tools subversion swig uglifyjs \
-         upx-ucl unzip vim wget xxd \
-         zlib1g-dev zstd
-
-         
-
-    ##########################################################################
-    # 4. 克隆 ImmortalWrt（直接指定分支）
-    ##########################################################################
-    - name: 克隆 ImmortalWrt 源码
-      run: |
-        git clone --depth=1 -b "$REPO_BRANCH" "$REPO_URL" "$OPENWRT_DIR"
-
-    ##########################################################################
-    # 5. cache
-    ##########################################################################
-    - name: 缓存构建
-      uses: klever1988/cachewrtbuild@main
-      with:
-        ccache: true
-        prefix: ${{ github.workspace }}/openwrt
-        mixkey: ipq807x-s10-${{ env.REPO_BRANCH }}
-
-    ##########################################################################
-    # 6. 更新 feeds（完全信任你仓库里的 feeds.conf）
-    ##########################################################################
-    - name: 更新 feeds
-      run: |
-        cd "$OPENWRT_DIR"
-        ./scripts/feeds update -a
-        ./scripts/feeds install -a
-        ./scripts/feeds install -a -f -p qmodem
-
-    ##########################################################################
-    # 7. 放入配置并 defconfig
-    ##########################################################################
-    - name: 配置 .config
-      run: |
-        cd "$OPENWRT_DIR"
-        if [ -f "${{ github.workspace }}/.config" ]; then
-          cp "${{ github.workspace }}/.config" .config
-          echo "使用自带 .config"
-        fi
-        make defconfig
-
-    ##########################################################################
-    # 8. 下载源码
-    ##########################################################################
-    - name: 下载源码
-      run: |
-        cd "$OPENWRT_DIR"
-        make download -j$(nproc)
-        find dl -size -1024c -delete
-
-    ##########################################################################
-    # 10. 编译
-    ##########################################################################
-    - name: 编译固件
-      run: |
-        cd "$OPENWRT_DIR"
-        make -j$(nproc) || make -j1 V=s
-
-    ##########################################################################
-    # 11. 上传固件
-    ##########################################################################
-    - name: 上传固件
-      if: env.UPLOAD_FIRMWARE == 'true'
-      uses: actions/upload-artifact@v4
-      with:
-        name: immortalwrt-ipq807x-s10
-        path: openwrt/bin/targets
-        retention-days: 30
-    ##########################################################################
-    # 3. 初始化构建环境
-    ##########################################################################
-    - name: 初始化构建环境
-      env:
-        DEBIAN_FRONTEND: noninteractive
-      run: |
-        sudo timedatectl set-timezone "$TZ"
-        
-        # 更新系统
         sudo apt-get update
         sudo apt-get upgrade -y
-        
-        # 安装核心编译工具（分步安装，避免依赖冲突）
+
+        # 基础工具
         sudo apt-get install -y \
-          build-essential \
-          clang \
-          cmake \
-          ninja-build \
-          flex \
-          bison \
-          gawk \
-          gcc-multilib \
-          g++-multilib \
-          gettext \
-          git \
-          libncurses5-dev \
-          libncursesw5-dev \
-          libssl-dev \
-          python3 \
-          python3-pip \
-          python3-venv \
-          rsync \
-          unzip \
-          zlib1g-dev \
-          file \
-          wget \
-          curl \
-          jq \
-          ca-certificates \
-          ccache
-        
-        # 内核编译工具
+          build-essential clang cmake ninja-build flex bison gawk \
+          gcc-multilib g++-multilib gettext git \
+          python3 python3-pip python3-venv rsync unzip zlib1g-dev \
+          wget curl patch jq ca-certificates ccache \
+          libncurses5-dev libncursesw5-dev libssl-dev file
+
+        # 内核编译依赖
         sudo apt-get install -y \
-          libelf-dev \
-          dwarves \
-          libbabeltrace-dev \
-          libiberty-dev \
-          libzstd-dev \
-          libpci-dev \
-          libdw-dev \
-          libnuma-dev \
-          libslang2-dev \
-          libperl-dev \
-          libunwind-dev \
-          libbpf-dev \
-          libdebuginfod-dev \
-          libtraceevent-dev \
-          liblzma-dev
-        
-        # NSS 相关依赖
+          libelf-dev dwarves libzstd-dev libnuma-dev \
+          libunwind-dev libbpf-dev libdebuginfod-dev liblzma-dev
+
+        # NSS/网络依赖
         sudo apt-get install -y \
-          libcurl4-openssl-dev \
-          libnl-3-dev \
-          libnl-genl-3-dev \
-          libnl-route-3-dev \
-          libpcap-dev \
-          libusb-1.0-0-dev
-        
-        # 网络工具
+          libcurl4-openssl-dev libnl-3-dev libnl-genl-3-dev libnl-route-3-dev \
+          libpcap-dev libusb-1.0-0-dev iptables iproute2 net-tools ethtool bridge-utils
+
+        # 文档/feeds依赖
         sudo apt-get install -y \
-          iptables \
-          iproute2 \
-          net-tools \
-          ethtool \
-          bridge-utils
-        
-        # 配置ccache
+          asciidoc xmlto python3-docutils
+
+        # 配置 ccache
         sudo ccache --max-size=10G
         sudo ccache --set-config=sloppiness=file_macro,locale,time_macros
-        
-    - name: 设置ccache缓存
+
+    - name: 设置 ccache 环境变量
+      run: |
+        echo "PATH=$HOME/.local/bin:$PATH" >> $GITHUB_ENV
+        echo "USE_CCACHE=1" >> $GITHUB_ENV
+        echo "CCACHE_DIR=/tmp/ccache" >> $GITHUB_ENV
+
+    - name: 设置 ccache 缓存
       uses: actions/cache@v3
       with:
         path: /tmp/ccache
         key: ${{ runner.os }}-ccache-${{ github.sha }}
         restore-keys: |
           ${{ runner.os }}-ccache-
-    
-    - name: 配置环境变量
-      run: |
-        echo "PATH=$HOME/.local/bin:$PATH" >> $GITHUB_ENV
-        echo "USE_CCACHE=1" >> $GITHUB_ENV
-        echo "CCACHE_DIR=/tmp/ccache" >> $GITHUB_ENV
+
     ##########################################################################
-    # 4. 克隆 ImmortalWrt（直接指定分支）
+    # 4. 克隆 ImmortalWrt 源码
     ##########################################################################
-    - name: 克隆 ImmortalWrt 源码
+    - name: 克隆 ImmortalWrt
       run: |
         git clone --depth=1 -b "$REPO_BRANCH" "$REPO_URL" "$OPENWRT_DIR"
 
     ##########################################################################
-    # 5. cache
+    # 5. 缓存 OpenWrt 构建
     ##########################################################################
     - name: 缓存构建
       uses: klever1988/cachewrtbuild@main
@@ -244,7 +103,7 @@ jobs:
         mixkey: ipq807x-s10-${{ env.REPO_BRANCH }}
 
     ##########################################################################
-    # 6. 更新 feeds（完全信任你仓库里的 feeds.conf）
+    # 6. 更新 feeds
     ##########################################################################
     - name: 更新 feeds
       run: |
@@ -275,7 +134,7 @@ jobs:
         find dl -size -1024c -delete
 
     ##########################################################################
-    # 9. 编译
+    # 9. 编译固件
     ##########################################################################
     - name: 编译固件
       run: |
