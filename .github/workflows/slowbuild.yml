@@ -42,18 +42,92 @@ jobs:
         DEBIAN_FRONTEND: noninteractive
       run: |
         sudo timedatectl set-timezone "$TZ"
+        
+        # 更新系统
         sudo apt-get update
+        sudo apt-get upgrade -y
+        
+        # 安装核心编译工具（分步安装，避免依赖冲突）
         sudo apt-get install -y \
-          build-essential clang flex gawk gcc-multilib gettext git \
-          libncurses5-dev libssl-dev python3 python3-distutils python3-pip \
-          rsync unzip zlib1g-dev file wget curl jq \
-          ca-certificates ccache
-
-        # 安装 GCC 11 并切换默认
-        sudo apt-get install -y gcc-11 g++-11
-        sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 100
-        sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-11 100
-
+          build-essential \
+          clang \
+          cmake \
+          ninja-build \
+          flex \
+          bison \
+          gawk \
+          gcc-multilib \
+          g++-multilib \
+          gettext \
+          git \
+          libncurses5-dev \
+          libncursesw5-dev \
+          libssl-dev \
+          python3 \
+          python3-pip \
+          python3-venv \
+          rsync \
+          unzip \
+          zlib1g-dev \
+          file \
+          wget \
+          curl \
+          jq \
+          ca-certificates \
+          ccache
+        
+        # 内核编译工具
+        sudo apt-get install -y \
+          libelf-dev \
+          dwarves \
+          libbabeltrace-dev \
+          libiberty-dev \
+          libzstd-dev \
+          libpci-dev \
+          libdw-dev \
+          libnuma-dev \
+          libslang2-dev \
+          libperl-dev \
+          libunwind-dev \
+          libbpf-dev \
+          libdebuginfod-dev \
+          libtraceevent-dev \
+          liblzma-dev
+        
+        # NSS 相关依赖
+        sudo apt-get install -y \
+          libcurl4-openssl-dev \
+          libnl-3-dev \
+          libnl-genl-3-dev \
+          libnl-route-3-dev \
+          libpcap-dev \
+          libusb-1.0-0-dev
+        
+        # 网络工具
+        sudo apt-get install -y \
+          iptables \
+          iproute2 \
+          net-tools \
+          ethtool \
+          bridge-utils
+        
+        # 配置ccache
+        sudo ccache --max-size=10G
+        sudo ccache --set-config=sloppiness=file_macro,locale,time_macros
+        
+    - name: 设置ccache缓存
+      uses: actions/cache@v3
+      with:
+        path: /tmp/ccache
+        key: ${{ runner.os }}-ccache-${{ github.sha }}
+        restore-keys: |
+          ${{ runner.os }}-ccache-
+    
+    - name: 配置环境变量
+      run: |
+        echo "PATH=$HOME/.local/bin:$PATH" >> $GITHUB_ENV
+        echo "USE_CCACHE=1" >> $GITHUB_ENV
+        echo "CCACHE_DIR=/tmp/ccache" >> $GITHUB_ENV
     ##########################################################################
     # 4. 克隆 ImmortalWrt（直接指定分支）
     ##########################################################################
