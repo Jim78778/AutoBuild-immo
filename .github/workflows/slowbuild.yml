@@ -25,8 +25,8 @@ jobs:
       uses: easimon/maximize-build-space@master
       with:
         swap-size-mb: 1024
-        temp-reserve-mb: 1024
-        root-reserve-mb: 2048
+        temp-reserve-mb: 2048
+        root-reserve-mb: 4096
 
     ##########################################################################
     # 2. Checkout workflow 仓库
