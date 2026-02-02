@@ -15,7 +15,7 @@ env:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest 
 
     steps:
     ##########################################################################
@@ -34,6 +34,102 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
 
+    ##########################################################################
+    # 3. 初始化构建环境
+    ##########################################################################
+    - name: 初始化构建环境
+      env:
+        DEBIAN_FRONTEND: noninteractive
+      run: |
+        sudo timedatectl set-timezone "$TZ"
+    
+        sudo apt-get update
+        sudo apt-get install -y \
+         ack antlr3 asciidoc autoconf automake autopoint \
+         binutils bison build-essential \
+         bzip2 ccache clang cmake cpio curl \
+         device-tree-compiler ecj fastjar flex gawk gettext \
+         gcc-multilib g++-multilib git gnutls-dev gperf \
+         haveged help2man intltool \
+         lib32gcc-s1 libc6-dev-i386 libelf-dev \
+         libglib2.0-dev libgmp3-dev libltdl-dev \
+         libmpc-dev libmpfr-dev libncurses-dev \
+         libpython3-dev libreadline-dev libssl-dev \
+         libtool libyaml-dev libz-dev \
+         lld llvm lrzsz mkisofs msmtp nano \
+         ninja-build p7zip p7zip-full patch pkgconf \
+         python3 python3-pip python3-ply python3-docutils \
+         python3-pyelftools qemu-utils re2c rsync scons \
+         squashfs-tools subversion swig texinfo uglifyjs \
+         upx-ucl unzip vim wget xmlto xxd \
+         zlib1g-dev zstd
+
+    ##########################################################################
+    # 4. 克隆 ImmortalWrt（直接指定分支）
+    ##########################################################################
+    - name: 克隆 ImmortalWrt 源码
+      run: |
+        git clone --depth=1 -b "$REPO_BRANCH" "$REPO_URL" "$OPENWRT_DIR"
+
+    ##########################################################################
+    # 5. cache
+    ##########################################################################
+    - name: 缓存构建
+      uses: klever1988/cachewrtbuild@main
+      with:
+        ccache: true
+        prefix: ${{ github.workspace }}/openwrt
+        mixkey: ipq807x-s10-${{ env.REPO_BRANCH }}
+
+    ##########################################################################
+    # 6. 更新 feeds（完全信任你仓库里的 feeds.conf）
+    ##########################################################################
+    - name: 更新 feeds
+      run: |
+        cd "$OPENWRT_DIR"
+        ./scripts/feeds update -a
+        ./scripts/feeds install -a
+        ./scripts/feeds install -a -f -p qmodem
+
+    ##########################################################################
+    # 7. 放入配置并 defconfig
+    ##########################################################################
+    - name: 配置 .config
+      run: |
+        cd "$OPENWRT_DIR"
+        if [ -f "${{ github.workspace }}/.config" ]; then
+          cp "${{ github.workspace }}/.config" .config
+          echo "使用自带 .config"
+        fi
+        make defconfig
+
+    ##########################################################################
+    # 8. 下载源码
+    ##########################################################################
+    - name: 下载源码
+      run: |
+        cd "$OPENWRT_DIR"
+        make download -j$(nproc)
+        find dl -size -1024c -delete
+
+    ##########################################################################
+    # 10. 编译
+    ##########################################################################
+    - name: 编译固件
+      run: |
+        cd "$OPENWRT_DIR"
+        make -j$(nproc) || make -j1 V=s
+
+    ##########################################################################
+    # 11. 上传固件
+    ##########################################################################
+    - name: 上传固件
+      if: env.UPLOAD_FIRMWARE == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: immortalwrt-ipq807x-s10
+        path: openwrt/bin/targets
+        retention-days: 30
     ##########################################################################
     # 3. 初始化构建环境
     ##########################################################################
