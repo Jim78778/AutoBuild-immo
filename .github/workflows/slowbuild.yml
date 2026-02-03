@@ -25,8 +25,8 @@ jobs:
       uses: easimon/maximize-build-space@master
       with:
         swap-size-mb: 1024
-        temp-reserve-mb: 2048
-        root-reserve-mb: 4096
+        temp-reserve-mb: 4096
+        root-reserve-mb: 5120
 
     ##########################################################################
     # 2. Checkout workflow 仓库
@@ -139,7 +139,7 @@ jobs:
     - name: 编译固件
       run: |
         cd "$OPENWRT_DIR"
-        make -j$(nproc) || make -j1 V=s
+        make -j1 V=s
 
     ##########################################################################
     # 10. 上传固件
