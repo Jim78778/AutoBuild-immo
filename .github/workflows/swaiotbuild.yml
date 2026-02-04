@@ -25,7 +25,7 @@ jobs:
       uses: easimon/maximize-build-space@master
       with:
         swap-size-mb: 1024
-        temp-reserve-mb: 2048
+        temp-reserve-mb: 0
         root-reserve-mb: 2048
 
     ##########################################################################
