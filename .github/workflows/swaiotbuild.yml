@@ -24,9 +24,9 @@ jobs:
     - name: 合并磁盘
       uses: easimon/maximize-build-space@master
       with:
-        swap-size-mb: 2048
+        swap-size-mb: 512
         temp-reserve-mb: 1024
-        root-reserve-mb: 4096
+        root-reserve-mb: 2048
 
     ##########################################################################
     # 2. Checkout workflow 仓库
