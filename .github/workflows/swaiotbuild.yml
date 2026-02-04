@@ -15,7 +15,7 @@ env:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
 
     steps:
     ##########################################################################
@@ -24,8 +24,8 @@ jobs:
     - name: 合并磁盘
       uses: easimon/maximize-build-space@master
       with:
-        swap-size-mb: 1024
-        temp-reserve-mb: 1024
+        swap-size-mb: 2048
+        temp-reserve-mb: 2048
         root-reserve-mb: 2048
 
     ##########################################################################
