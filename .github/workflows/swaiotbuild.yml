@@ -112,6 +112,21 @@ jobs:
         ./scripts/feeds install -a
         ./scripts/feeds install -a -f -p qmodem
 
+     - name: Remove qca-nss-ecm (force)
+       run: |
+         cd "$OPENWRT_DIR"
+
+         echo ">>> Removing qca-nss-ecm from feeds"
+         rm -rf feeds/nss_packages/qca-nss-ecm || true
+         rm -rf package/feeds/nss_packages/qca-nss-ecm || true
+
+         echo ">>> Ensure config does not enable qca-nss-ecm"
+         sed -i '/qca-nss-ecm/d' .config || true
+         sed -i '/NSS_ECM/d' .config || true
+
+         make defconfig
+   
+
     ##########################################################################
     # 7. 放入配置并 defconfig
     ##########################################################################
