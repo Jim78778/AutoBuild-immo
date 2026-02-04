@@ -109,7 +109,7 @@ jobs:
     - name: Build firmware
       run: |
         cd "$OPENWRT_DIR"
-        make -j$(nproc) || make -j1 V=s
+        make -j2 V=s
 
     ##########################################################################
     # 10. 上传固件
