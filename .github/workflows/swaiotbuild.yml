@@ -108,7 +108,19 @@ jobs:
         ./scripts/feeds install -a -f -p qmodem
 
     ##########################################################################
-    # 7. 强制移除 qca-nss-ecm（关键）
+    # 7. 放入 .config 并 defconfig
+    ##########################################################################
+    - name: 配置 .config
+      run: |
+        cd "$OPENWRT_DIR"
+        if [ -f "${{ github.workspace }}/.config" ]; then
+          cp "${{ github.workspace }}/.config" .config
+          echo ">>> Using provided .config"
+        fi
+        make defconfig
+
+    ##########################################################################
+    # 8. 强制移除 qca-nss-ecm（关键）
     ##########################################################################
     - name: Remove qca-nss-ecm (force)
       run: |
@@ -120,19 +132,8 @@ jobs:
 
         sed -i '/qca-nss-ecm/d' .config || true
         sed -i '/NSS_ECM/d' .config || true
-
-    ##########################################################################
-    # 8. 放入 .config 并 defconfig
-    ##########################################################################
-    - name: 配置 .config
-      run: |
-        cd "$OPENWRT_DIR"
-        if [ -f "${{ github.workspace }}/.config" ]; then
-          cp "${{ github.workspace }}/.config" .config
-          echo ">>> Using provided .config"
-        fi
         make defconfig
-
+    
     ##########################################################################
     # 9. 下载源码
     ##########################################################################
