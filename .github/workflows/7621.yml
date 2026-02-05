@@ -59,7 +59,6 @@ jobs:
         cat > .config << 'EOF'
         CONFIG_TARGET_ramips=y
         CONFIG_TARGET_ramips_mt7621=y
-        CONFIG_TARGET_ramips_mt7621_DEVICE_lenovo_newifi-d2=y
 
         CONFIG_PACKAGE_luci=y
         CONFIG_PACKAGE_luci-ssl=y
