@@ -84,6 +84,10 @@ jobs:
         cd "$OPENWRT_DIR"
         make defconfig
 
+        cd package/system/opkg
+        wget -O Makefile https://raw.githubusercontent.com/openwrt/openwrt/openwrt-25.12/package/system/opkg/Makefile
+        cd ../../..
+    
     - name: Download packages
       run: |
         cd "$OPENWRT_DIR"
