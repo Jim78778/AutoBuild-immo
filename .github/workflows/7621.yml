@@ -52,7 +52,7 @@ jobs:
         cd "$OPENWRT_DIR"
         ./scripts/feeds update -a
         ./scripts/feeds install -a
-
+        ./scripts/feeds install -a -p qmodem
     - name: Generate .config (newifi D2)
       run: |
         cd "$OPENWRT_DIR"
@@ -87,7 +87,10 @@ jobs:
         cd package/system/opkg
         wget -O Makefile https://raw.githubusercontent.com/openwrt/openwrt/openwrt-25.12/package/system/opkg/Makefile
         cd ../../..
-    
+    - name: Clean dl cache (fullconenat-nft)
+      run: |
+         rm -f openwrt/dl/fullconenat-nft-*.tar.*
+
     - name: Download packages
       run: |
         cd "$OPENWRT_DIR"
