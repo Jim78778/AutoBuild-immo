@@ -110,9 +110,7 @@ jobs:
           echo "使用自带 .config"
         fi
         make defconfig
-        cd package/system/opkg
-        wget -O Makefile https://raw.githubusercontent.com/openwrt/openwrt/openwrt-25.12/package/system/opkg/Makefile
-        cd ../../..
+       
     ##########################################################################
     # 8. 下载源码
     ##########################################################################
