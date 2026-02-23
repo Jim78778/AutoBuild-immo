@@ -1,4 +1,4 @@
-name:  Swaiot CPE-S10 (ipq807x NSS)
+name: Swaiot CPE-S10 (ipq807x NSS)
 
 on:
   workflow_dispatch:
@@ -10,8 +10,6 @@ env:
   TZ: Asia/Shanghai
   REPO_URL: https://github.com/Jim78778/immortalwrt.git
   REPO_BRANCH: main
-  CONFIG_FILE: ci.config
-  DIY_SCRIPT: diy-part1.sh
   UPLOAD_FIRMWARE: true
   OPENWRT_DIR: /mnt/openwrt-build
 
@@ -20,214 +18,62 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-    # 1. Checkout workflow repo
     - name: Checkout workflow repo
       uses: actions/checkout@v4
 
-    # 2. Set timezone
     - name: Set timezone
       run: sudo timedatectl set-timezone "$TZ"
 
-    # 3. Free disk space
     - name: Free disk space
       run: |
         sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
         sudo apt-get clean
         df -h
 
-    # 4. Install build dependencies
     - name: Install build dependencies
       run: |
         sudo apt update
         sudo apt install -y \
-          ack antlr3 asciidoc autoconf automake autopoint binutils bison \
-          build-essential bzip2 ccache clang cmake cpio curl \
-          device-tree-compiler ecj fastjar flex gawk gettext \
-          gcc g++ gcc-12 g++-12 gcc-multilib g++-multilib \
-          git gperf haveged help2man intltool jq lib32gcc-s1 libc6-dev-i386 \
-          libelf-dev libglib2.0-dev libgmp3-dev libltdl-dev libmpc-dev \
-          libmpfr-dev libncurses5-dev libncursesw5-dev libreadline-dev \
-          libssl-dev libtool lld lrzsz mkisofs msmtp nano ninja-build \
-          p7zip p7zip-full patch pkgconf python-is-python3 python3 python3-pip \
-          python3-ply python3-docutils python3-setuptools python3-wheel \
-          qemu-utils re2c rsync scons squashfs-tools subversion swig texinfo \
-          uglifyjs upx-ucl unzip vim wget xmlto xxd zlib1g-dev bc file time \
-          xz-utils zstd liblzma-dev libzstd-dev libstdc++-12-dev libcap-dev \
-          libnl-3-dev libnl-genl-3-dev
+          build-essential clang flex gawk gcc-multilib g++-multilib \
+          gettext git libncurses-dev libssl-dev python3 \
+          rsync unzip zlib1g-dev file wget bc time \
+          libelf-dev device-tree-compiler
 
-        # 安装 NSS 缺失的主机依赖
-        pip3 install pysocks unidecode
-
-    # 5. Prepare /mnt build directory
     - name: Prepare /mnt build directory
       run: |
         sudo mkdir -p "$OPENWRT_DIR"
         sudo chown $USER:$USER "$OPENWRT_DIR"
-        df -h /mnt
 
-    # 6. Clone openwrt-ipq source
-    - name: Clone openwrt-ipq
+    - name: Clone source
       run: |
         git clone --depth=1 -b "$REPO_BRANCH" "$REPO_URL" "$OPENWRT_DIR"
 
-    # 7. Copy ci.config and diy script
-    - name: Copy configs and DIY script
-      run: |
-        # 首先复制 ci.config 作为基础配置
-        cp "${{ github.workspace }}/$CONFIG_FILE" "$OPENWRT_DIR/.config"
-        # 然后复制 diy 脚本
-        cp "${{ github.workspace }}/$DIY_SCRIPT" "$OPENWRT_DIR/"
-        chmod +x "$OPENWRT_DIR/$DIY_SCRIPT"
-
-    # 8. Update & install feeds
     - name: Update & install feeds
       run: |
         cd "$OPENWRT_DIR"
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
-    # 9. Apply diy-part1.sh (执行自定义配置合并和NSS处理)
-    - name: Apply diy-part1.sh
+    # 🔥 直接用默认配置
+    - name: Load default config
       run: |
         cd "$OPENWRT_DIR"
-        chmod +x "$DIY_SCRIPT"
-        echo "执行 DIY 脚本进行配置合并和NSS处理..."
-        ./$DIY_SCRIPT
+        make defconfig
 
-    # 10. Load config (使用 make defconfig 标准化配置)
-    - name: Load config
-      run: |
-        cd "$OPENWRT_DIR"
-        echo "生成最终标准化配置..."
-        # 先备份 DIY 处理后的配置
-        cp .config .config.diy-backup
-        
-        # 执行 defconfig 来标准化配置
-        if ! make defconfig 2>&1; then
-          echo "❌ make defconfig 失败，检查错误日志"
-          # 显示最后50行错误
-          echo "最后50行输出:"
-          tail -50 .config.log 2>/dev/null || echo "无日志文件"
-          exit 1
-        fi
-        
-        echo "✅ 配置标准化完成"
-        
-        # 显示配置变化摘要
-        echo ""
-        echo "配置变化摘要:"
-        echo "---------------"
-        if [ -f .config.diy-backup ]; then
-          diff -u .config.diy-backup .config | grep -E "^[+-]" | grep -v "^---" | grep -v "^+++" | head -10 || true
-        fi
-
-    # 11. Debug NSS config
-    - name: Debug NSS config
-      run: |
-        cd "$OPENWRT_DIR"
-        echo "===== 最终 NSS 配置状态 ====="
-        grep -E "CONFIG_PACKAGE.*(NSS|nss)" .config | head -20 || echo "未找到 NSS 配置"
-        
-        echo ""
-        echo "===== 关键配置检查 ====="
-        echo "目标架构: $(grep '^CONFIG_TARGET_' .config | head -1)"
-        echo "内核版本: $(grep '^CONFIG_LINUX_' .config | head -1)"
-        echo "启用的包数量: $(grep -c '^CONFIG_PACKAGE.*=y' .config)"
-
-    # 12. Download all sources
     - name: Download packages
       run: |
         cd "$OPENWRT_DIR"
-        make download -j1 V=s
+        make download -j$(nproc)
 
-    # 13. Build firmware (安全版本，不使用危险的管道)
     - name: Build firmware
       run: |
         cd "$OPENWRT_DIR"
-        
-        echo "开始构建固件..."
-        
-        # 方法1: 直接构建，记录日志
-        build_log="$OPENWRT_DIR/build.log"
-        
-        # 使用函数处理构建过程
-        build_with_fallback() {
-          local max_jobs=$(nproc)
-          
-          echo "尝试使用 $max_jobs 个并行任务构建..."
-          
-          # 尝试并行构建，将输出同时显示和保存到文件
-          if make -j$max_jobs V=s 2>&1 | tee "$build_log"; then
-            echo "✅ 并行构建成功"
-            return 0
-          else
-            # 检查是否只是警告，而不是真正的错误
-            if tail -10 "$build_log" | grep -q "Error"; then
-              echo "❌ 检测到真正的构建错误"
-              return 1
-            fi
-            
-            echo "⚠️ 并行构建遇到问题，尝试单线程构建..."
-            if make -j1 V=s 2>&1 | tee -a "$build_log"; then
-              echo "✅ 单线程构建成功"
-              return 0
-            else
-              echo "❌ 单线程构建也失败"
-              return 1
-            fi
-          fi
-        }
-        
-        # 执行构建
-        if build_with_fallback; then
-          echo "✅ 固件构建完成"
-        else
-          echo "❌ 固件构建失败"
-          echo ""
-          echo "最后100行构建日志:"
-          tail -100 "$build_log" || true
-          exit 1
-        fi
+        make -j$(nproc) V=s
 
-    # 14. Verify firmware files
-    - name: Verify firmware files
-      run: |
-        firmware_dir="$OPENWRT_DIR/bin/targets/qualcommax/ipq807x"
-        
-        if [ ! -d "$firmware_dir" ]; then
-          echo "❌ 固件目录不存在: $firmware_dir"
-          exit 1
-        fi
-        
-        echo "✅ 固件目录存在"
-        echo "文件列表:"
-        ls -la "$firmware_dir/"
-        
-        # 检查关键文件
-        swaiot_files=$(find "$firmware_dir" -name "*swaiot_cpe_s10*" | wc -l)
-        if [ "$swaiot_files" -eq 0 ]; then
-          echo "❌ 未找到针对 Swaiot CPE-S10 的固件"
-          exit 1
-        fi
-        
-        echo "✅ 找到 $swaiot_files 个 Swaiot CPE-S10 固件"
-        
-        # 列出具体的固件文件
-        echo "生成的固件:"
-        find "$firmware_dir" -name "*swaiot_cpe_s10*" -o -name "*.bin" -o -name "*.ubi" -o -name "*.itb" 2>/dev/null | \
-          while read file; do
-            size=$(du -h "$file" | cut -f1)
-            echo "  - $(basename "$file") ($size)"
-          done
-
-    # 15. Upload firmware (修复路径问题)
     - name: Upload firmware
       if: env.UPLOAD_FIRMWARE == 'true'
       uses: actions/upload-artifact@v4
       with:
         name: Swaiot-CPE-S10-ipq807x-NSS
-        # 使用正确的环境变量语法
         path: ${{ env.OPENWRT_DIR }}/bin/targets/qualcommax/ipq807x/
         if-no-files-found: error
-        retention-days: 30
-        compression-level: 6
