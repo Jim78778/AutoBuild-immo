@@ -8,8 +8,8 @@ on:
 
 env:
   TZ: Asia/Shanghai
-  REPO_URL: https://github.com/Jim78778/immortalwrt.git
-  REPO_BRANCH: main
+  REPO_URL: https://github.com/Jim78778/openwrt-ipq.git
+  REPO_BRANCH: swaiot-s10
   CONFIG_FILE: ci.config
   DIY_SCRIPT: diy-part1.sh
   UPLOAD_FIRMWARE: true
@@ -69,15 +69,6 @@ jobs:
     - name: Clone openwrt-ipq
       run: |
         git clone --depth=1 -b "$REPO_BRANCH" "$REPO_URL" "$OPENWRT_DIR"
-
-    # 7. Copy ci.config and diy script
-    - name: Copy configs and DIY script
-      run: |
-        # 首先复制 ci.config 作为基础配置
-        cp "${{ github.workspace }}/$CONFIG_FILE" "$OPENWRT_DIR/.config"
-        # 然后复制 diy 脚本
-        cp "${{ github.workspace }}/$DIY_SCRIPT" "$OPENWRT_DIR/"
-        chmod +x "$OPENWRT_DIR/$DIY_SCRIPT"
 
     # 8. Update & install feeds
     - name: Update & install feeds
